@@ -66,7 +66,9 @@ class Session:
         names = []
         r, _ = self.find("*", True)
         while r is not None and len(r) > 14 and r[4] == 0x04 and len(names) < 2000:
-            names.append(bytes(r[14:]).split(b"\0", 1)[0].decode("ascii", "replace"))
+            raw = bytes(r[14:])
+            end = next((i for i, b in enumerate(raw) if b < 0x20 or b > 0x7E), len(raw))
+            names.append(raw[:end].decode("ascii"))  # the B6 can leave a stray byte after the name
             r, _ = self.find("*", False)
         return names
 

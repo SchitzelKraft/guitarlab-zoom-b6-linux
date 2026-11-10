@@ -57,7 +57,8 @@ does not start properly without them. Without the others, names, icons and pictu
 
    The effect drawings (`<module>.svg`, about 390 files) can only be taken from a Guitar Lab
    that has been connected to the B6 once. Guitar Lab for Windows runs under Wine; after
-   it has shown the pedal, copy the folder:
+   it has shown the pedal, copy the folder from its Wine prefix (`~/.wine` unless you chose
+   another one with `WINEPREFIX`):
 
        mkdir -p analysis/win-download/SVG
        cp ~/.wine/drive_c/users/$USER/AppData/Roaming/GL/SVG/*.svg analysis/win-download/SVG/
