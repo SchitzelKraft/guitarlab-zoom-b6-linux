@@ -110,8 +110,10 @@ class RemoteController(
     }
 
     /** With [replaceSlot] changes that entry's type, otherwise adds [fxId] at the end of the chain. */
-    fun choose(fxId: Int, replaceSlot: Int?) {
-        val (ref, count) = synchronized(lock) { shownRef to (lastState.edit?.effects?.size ?: 0) }
+    fun choose(fxId: Int, replaceSlot: Int?, expected: PatchRef? = null) {
+        if (!fits(fxId, replaceSlot)) return
+        val (shown, count) = synchronized(lock) { shownRef to (lastState.edit?.effects?.size ?: 0) }
+        val ref = expected ?: shown
         if (ref == null) return
         scope.launch {
             if (replaceSlot != null) {
@@ -138,8 +140,11 @@ class RemoteController(
         return catalog.fits(edit, fxId, replaceSlot)
     }
 
-    fun remove(slot: Int) {
-        val ref = synchronized(lock) { shownRef } ?: return
+    /** The patch the board shows now; a chooser keeps the one it was opened on and passes it as `expected`. */
+    fun currentRef(): PatchRef? = synchronized(lock) { shownRef }
+
+    fun remove(slot: Int, expected: PatchRef? = null) {
+        val ref = expected ?: synchronized(lock) { shownRef } ?: return
         scope.launch { session.delete(ref, slot) }
     }
 

@@ -23,9 +23,19 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.b6lab.remote.core.Catalog
 import nl.b6lab.remote.core.Connection
+import nl.b6lab.remote.core.PatchRef
 import nl.b6lab.remote.ui.B6Theme
 import nl.b6lab.remote.ui.BoardScreen
 import nl.b6lab.remote.ui.ChooserScreen
+
+private class ChooserTarget(val ref: PatchRef, val replaceSlot: Int) {
+    companion object {
+        val Saver = androidx.compose.runtime.saveable.Saver<ChooserTarget?, List<Int>>(
+            save = { t -> t?.let { listOf(it.replaceSlot, it.ref.slot) + it.ref.fxIds } ?: emptyList() },
+            restore = { l -> if (l.isEmpty()) null else ChooserTarget(PatchRef(l[1], l.drop(2)), l[0]) },
+        )
+    }
+}
 
 /** Shows the board while a session exists, otherwise a status screen. */
 class MainActivity : ComponentActivity() {
@@ -48,11 +58,25 @@ class MainActivity : ComponentActivity() {
                 val c = controller
                 if (c != null) {
                     val ui by c.ui.collectAsStateWithLifecycle()
-                    // null = closed; otherwise the replaceSlot the chooser works on (-1 = add at the end)
-                    var chooser by rememberSaveable { mutableStateOf<Int?>(null) }
-                    BoardScreen(ui, c, onAddEffect = { chooser = -1 }, onLongPressPedal = { chooser = it })
-                    chooser?.let { slot ->
-                        ChooserScreen(ui, catalog, c, slot.takeIf { it >= 0 }, onClose = { chooser = null })
+                    // null = closed; else the patch it was opened on (slot and chain) and the entry to change
+                    // (-1 = add at the end)
+                    var chooser by rememberSaveable(stateSaver = ChooserTarget.Saver) { mutableStateOf<ChooserTarget?>(null) }
+                    BoardScreen(
+                        ui, c,
+                        onAddEffect = { c.currentRef()?.let { chooser = ChooserTarget(it, -1) } },
+                        onLongPressPedal = { slot -> c.currentRef()?.let { chooser = ChooserTarget(it, slot) } },
+                    )
+                    chooser?.let { t ->
+                        val now = c.currentRef()
+                        if (now == null || now.slot != t.ref.slot) {
+                            // another patch: the chooser's choices would hit the wrong one
+                            chooser = null
+                        } else {
+                            ChooserScreen(
+                                ui, catalog, c, t.replaceSlot.takeIf { it >= 0 }, t.ref,
+                                onClose = { chooser = null },
+                            )
+                        }
                     }
                     return@B6Theme
                 }

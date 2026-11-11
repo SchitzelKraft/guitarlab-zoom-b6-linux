@@ -135,6 +135,36 @@ class ControllerTest {
     }
 
     @Test
+    fun staleChooserIsRefusedAfterPatchChange() = runTest {
+        val r = rig()
+        val opened = r.c.currentRef()!!
+        val slot = r.c.ui.value.pedals.first().slot
+        val fx = catalog.effects.values.first { it.fxId != r.s.state.value.edit!!.effects[slot].fxId && catalog.fits(r.s.state.value.edit!!, it.fxId, slot) }
+        r.p.footswitchTo(57)
+        settle()
+        val before = r.s.state.value.edit!!.effects.map { it.fxId }
+        assertTrue(r.c.currentRef() != opened)
+        r.c.remove(slot, opened)
+        settle()
+        assertEquals(before, r.s.state.value.edit!!.effects.map { it.fxId })
+        r.c.choose(fx.fxId, slot, opened)
+        settle()
+        assertEquals(before, r.s.state.value.edit!!.effects.map { it.fxId })
+    }
+
+    @Test
+    fun chooseDoesNothingWhenItDoesNotFit() = runTest {
+        val r = rig()
+        r.p.footswitchTo(16)
+        settle()
+        val before = r.p.sent.size
+        val fx = catalog.effects.values.first { !r.c.fits(it.fxId, null) }
+        r.c.choose(fx.fxId, null)
+        settle()
+        assertEquals(before, r.p.sent.size)
+    }
+
+    @Test
     fun nextPatchWraps() = runTest {
         val r = rig()
         r.p.footswitchTo(239)

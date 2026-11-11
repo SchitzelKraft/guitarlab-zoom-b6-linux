@@ -28,17 +28,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import nl.b6lab.remote.core.BoardUi
 import nl.b6lab.remote.core.Catalog
+import nl.b6lab.remote.core.PatchRef
 import nl.b6lab.remote.core.RemoteController
 
 /**
@@ -52,13 +55,14 @@ fun ChooserScreen(
     catalog: Catalog,
     controller: RemoteController,
     replaceSlot: Int?,
+    expected: PatchRef,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onClose)
     val loader = rememberSvgLoader()
     val groups = remember(catalog) { catalog.byGroup() }
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val current = groups.getOrNull(tab)?.second.orEmpty()
     // ui is read so that the greying follows a patch change while the chooser is open
     val fitting = remember(ui, current, replaceSlot) { current.map { controller.fits(it.fxId, replaceSlot) } }
@@ -67,6 +71,8 @@ fun ChooserScreen(
         modifier
             .fillMaxSize()
             .background(B6Colors.Background)
+            // consume touches on empty areas so nothing behind (the board) receives them
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }
             .safeDrawingPadding()
             .padding(horizontal = 12.dp),
     ) {
@@ -77,7 +83,7 @@ fun ChooserScreen(
             )
             if (replaceSlot != null) {
                 Button(
-                    onClick = { controller.remove(replaceSlot); onClose() },
+                    onClick = { controller.remove(replaceSlot, expected); onClose() },
                     modifier = Modifier.height(56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = B6Colors.Error),
                 ) { Text("Remove", fontSize = 16.sp) }
@@ -117,7 +123,7 @@ fun ChooserScreen(
                         .alpha(if (ok) 1f else 0.3f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(B6Colors.Surface)
-                        .let { if (ok) it.clickable { controller.choose(fx.fxId, replaceSlot); onClose() } else it }
+                        .let { if (ok) it.clickable { controller.choose(fx.fxId, replaceSlot, expected); onClose() } else it }
                         .padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
