@@ -25,3 +25,10 @@ b6lab/gui/assets/b6-reference.png
 
 # Brainstorm mockups and plan-execution scratch
 .superpowers/
+
+# Android app (B6 Remote): local SDK path, build output, generated Zoom data
+android/local.properties
+android/**/build/
+android/.gradle/
+android/app/src/main/assets/generated/
+android/core/src/test/resources/fixtures/
