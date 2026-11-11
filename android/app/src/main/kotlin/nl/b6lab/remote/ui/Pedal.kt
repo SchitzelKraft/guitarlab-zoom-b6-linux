@@ -106,46 +106,35 @@ fun Pedal(
             .graphicsLayer { translationX = dx }
             .clip(shape)
             .background(B6Colors.Surface)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress),
     ) {
         val fx = view.fx
-        Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
-            EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 60.dp, start = 4.dp, end = 4.dp))
-        }
-        // landscape: the whole pedal moves, except the footswitch strip
-        if (wholeDrag) Box(
-            Modifier.fillMaxSize().padding(bottom = 56.dp)
-            .pointerInput(index, count, pitchPx) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
-                        dx = 0f
-                        if (target != index) moveTo(target)
-                    },
-                    onDragCancel = { dx = 0f },
-                    onHorizontalDrag = { change, d -> change.consume(); dx += d },
-                )
-            },
-        )
-        // portrait: grip strip (56 dp touch area) moves the pedal; landscape: the whole pedal does
-        if (!wholeDrag) Box(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .pointerInput(index, count, pitchPx) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
-                            dx = 0f
-                            if (target != index) moveTo(target)
-                        },
-                        onDragCancel = { dx = 0f },
-                        onHorizontalDrag = { change, d -> change.consume(); dx += d },
-                    )
+        val moveDrag = Modifier.pointerInput(index, count, pitchPx) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
+                    dx = 0f
+                    if (target != index) moveTo(target)
                 },
-            contentAlignment = Alignment.TopCenter,
+                onDragCancel = { dx = 0f },
+                onHorizontalDrag = { change, d -> change.consume(); dx += d },
+            )
+        }
+        // the body (select, long press for the chooser, move) ends above the footswitch strip, which is a sibling
+        Box(
+            Modifier.fillMaxSize().padding(bottom = 56.dp)
+                .then(if (wholeDrag) moveDrag else Modifier) // landscape: the whole body moves the pedal
+                .combinedClickable(onClick = onTap, onLongClick = onLongPress),
         ) {
-            Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
+            Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
+                EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 4.dp, start = 4.dp, end = 4.dp))
+            }
+            // portrait: the grip strip (56 dp touch area) moves the pedal
+            if (!wholeDrag) Box(
+                Modifier.fillMaxWidth().height(56.dp).then(moveDrag),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
+            }
         }
         Row(
             Modifier
@@ -153,7 +142,7 @@ fun Pedal(
                 .fillMaxWidth()
                 .height(56.dp)
                 .background(B6Colors.SurfaceHigh)
-                .clickable(onClick = onToggle),
+                .combinedClickable(onClick = onToggle, onLongClick = {}),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {

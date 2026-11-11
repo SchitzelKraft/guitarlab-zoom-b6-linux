@@ -14,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -83,7 +84,9 @@ class ControllerTest {
 
     @Test
     fun demoPatchesAreNotDirtyAfterConnect() = runTest {
-        val demo = listOf(0, 2, 100).map { java.io.File("../app/src/main/assets/generated/demo/$it.bin").readBytes() }
+        val files = listOf(0, 2, 100).map { java.io.File("../app/src/main/assets/generated/demo/$it.bin") }
+        Assume.assumeTrue("demo patches missing: run android/prepare.sh", files.all { it.exists() })
+        val demo = files.map { it.readBytes() }
         val r = rig(FakePedal(demo))
         assertFalse(r.s.state.value.dirty)
         assertFalse(r.c.ui.value.canSave)
