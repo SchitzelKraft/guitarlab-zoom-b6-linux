@@ -19,6 +19,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import nl.b6lab.remote.core.B6Session
+import nl.b6lab.remote.core.Catalog
+import nl.b6lab.remote.core.RemoteController
 import nl.b6lab.remote.core.Connection
 import nl.b6lab.remote.core.FakePedal
 import nl.b6lab.remote.core.MidiTransport
@@ -30,7 +32,7 @@ import nl.b6lab.remote.core.Reconnector
  * (re)connection builds a new transport and a new session. Call [start] from onStart, [stop] from
  * onStop and [destroy] from onDestroy.
  */
-class PedalConnection(context: Context) {
+class PedalConnection(context: Context, private val catalog: Catalog) {
     private val app = context.applicationContext
     private val midi = app.getSystemService(Context.MIDI_SERVICE) as MidiManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -44,6 +46,13 @@ class PedalConnection(context: Context) {
 
     private val _isDemo = MutableStateFlow(false)
     val isDemo: StateFlow<Boolean> = _isDemo.asStateFlow()
+
+    private val _controller = MutableStateFlow<RemoteController?>(null)
+
+    /** Screen controller of the current session; null when there is none. */
+    val controller: StateFlow<RemoteController?> = _controller.asStateFlow()
+
+    private var controllerScope: CoroutineScope? = null
 
     /** The session of the current connection, for the UI actions of Task 9/10. */
     @Volatile
@@ -133,11 +142,17 @@ class PedalConnection(context: Context) {
         transport = t
         session = s
         stateJob = scope.launch { s.state.collect { _state.value = it } }
+        controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also {
+            _controller.value = RemoteController(it, s, catalog)
+        }
         s.connect()
     }
 
     private suspend fun teardown() {
+        _controller.value = null
         session?.disconnect()
+        controllerScope?.cancel()
+        controllerScope = null
         transport?.close()
         stateJob?.cancel()
         session = null

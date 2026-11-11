@@ -14,14 +14,16 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import nl.b6lab.remote.core.Catalog
 import nl.b6lab.remote.core.Connection
+import nl.b6lab.remote.ui.B6Theme
+import nl.b6lab.remote.ui.BoardScreen
 
-/** Minimal status screen until the board screen (Task 10) replaces it. */
+/** Shows the board while a session exists, otherwise a status screen. */
 class MainActivity : ComponentActivity() {
     private lateinit var pedal: PedalConnection
 
@@ -29,14 +31,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        pedal = PedalConnection(this)
+        val catalog = Catalog.load(assets.open("generated/catalog.json").use { it.readBytes().decodeToString() })
+        pedal = PedalConnection(this, catalog)
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         val demo = if (debuggable) loadDemoPatches() else null
         setContent {
             val state by pedal.state.collectAsStateWithLifecycle()
             val isDemo by pedal.isDemo.collectAsStateWithLifecycle()
+            val controller by pedal.controller.collectAsStateWithLifecycle()
             val color = MaterialTheme.colorScheme.onBackground
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            B6Theme {
+                val c = controller
+                if (c != null) {
+                    val ui by c.ui.collectAsStateWithLifecycle()
+                    BoardScreen(ui, c, onAddEffect = {}, onLongPressPedal = {})
+                    return@B6Theme
+                }
                 Column(
                     Modifier
                         .fillMaxSize()
