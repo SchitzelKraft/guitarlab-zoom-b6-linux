@@ -150,9 +150,12 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
 
     private suspend fun teardown() {
         _controller.value = null
-        session?.disconnect()
-        controllerScope?.cancel()
-        controllerScope = null
+        try {
+            session?.disconnect()
+        } finally {
+            controllerScope?.cancel()
+            controllerScope = null
+        }
         transport?.close()
         stateJob?.cancel()
         session = null

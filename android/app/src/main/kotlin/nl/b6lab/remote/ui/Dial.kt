@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,7 @@ fun Dial(
     modifier: Modifier = Modifier,
     size: Dp = 72.dp,
 ) {
+    var local by remember { mutableStateOf<Int?>(null) }
     val current by rememberUpdatedState(knob)
     val send by rememberUpdatedState(onValue)
     val rangePx = with(LocalDensity.current) { DRAG_RANGE.toPx() }
@@ -50,18 +54,22 @@ fun Dial(
                 var start = 0
                 var acc = 0f
                 detectVerticalDragGestures(
-                    onDragStart = { start = current.value; acc = 0f },
+                    onDragStart = { start = current.value; acc = 0f; local = start },
+                    onDragEnd = { local = null },
+                    onDragCancel = { local = null },
                     onVerticalDrag = { change, dy ->
                         change.consume()
                         acc -= dy
                         val v = (start + acc / rangePx * current.max).roundToInt().coerceIn(0, current.max)
+                        local = v
                         if (v != current.value) send(v)
                     },
                 )
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val frac = if (knob.max > 0) knob.value.toFloat() / knob.max else 0f
+        val shown = local ?: knob.value
+        val frac = if (knob.max > 0) shown.toFloat() / knob.max else 0f
         Box(Modifier.size(size), contentAlignment = Alignment.Center) {
             Canvas(Modifier.size(size)) {
                 val w = 6.dp.toPx()
@@ -78,7 +86,7 @@ fun Dial(
                     )
                 }
             }
-            Text(knob.text, color = B6Colors.Text, fontSize = 18.sp, maxLines = 1, textAlign = TextAlign.Center)
+            Text(if (shown != knob.value) shown.toString() else knob.text, color = B6Colors.Text, fontSize = 18.sp, maxLines = 1, textAlign = TextAlign.Center)
         }
         Text(
             knob.name, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1,

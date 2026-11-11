@@ -29,6 +29,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -172,13 +173,16 @@ private fun PedalRow(
         val rowMod = if (landscape) Modifier.fillMaxSize() else Modifier.fillMaxSize().horizontalScroll(rememberScrollState())
         Row(rowMod, horizontalArrangement = Arrangement.spacedBy(gap)) {
             ui.pedals.forEachIndexed { i, p ->
+              key(p.slot) {
                 Pedal(
                     view = p, index = i, count = used, pitchPx = pitch, loader = loader,
                     onTap = { c.tapPedal(p.slot) },
                     onLongPress = { onLong(p.slot) },
                     onMoveTo = { target -> c.move(p.slot, ui.pedals[target].slot) },
+                    wholeDrag = landscape,
                     modifier = Modifier.width(cell).fillMaxSize(),
                 )
+              }
             }
             repeat(plus) {
                 EmptyPlace({ onAdd(nextEntry) }, Modifier.width(cell).fillMaxSize())
@@ -221,18 +225,27 @@ private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit) {
+    var local by remember { mutableStateOf<Int?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = B6Colors.Surface) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(knob.name, color = B6Colors.TextDim, fontSize = 16.sp)
-            Text(knob.text, color = B6Colors.Text, fontSize = 40.sp)
+            Text(
+                local?.takeIf { it != knob.value }?.toString() ?: knob.text,
+                color = B6Colors.Text, fontSize = 40.sp,
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StepButton("-") { c.dragKnob(knob.index, knob.value - 1) }
                 Slider(
-                    value = knob.value.toFloat(),
-                    onValueChange = { c.dragKnob(knob.index, it.roundToInt().coerceIn(0, knob.max)) },
+                    value = (local ?: knob.value).toFloat(),
+                    onValueChange = {
+                        val v = it.roundToInt().coerceIn(0, knob.max)
+                        local = v
+                        c.dragKnob(knob.index, v)
+                    },
+                    onValueChangeFinished = { local = null },
                     valueRange = 0f..knob.max.toFloat().coerceAtLeast(1f),
                     modifier = Modifier.weight(1f).height(56.dp),
                 )

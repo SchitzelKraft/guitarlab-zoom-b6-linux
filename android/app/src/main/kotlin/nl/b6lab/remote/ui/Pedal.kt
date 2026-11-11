@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,8 +68,10 @@ fun Pedal(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onMoveTo: (Int) -> Unit,
+    wholeDrag: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val moveTo by rememberUpdatedState(onMoveTo)
     var dx by remember { mutableFloatStateOf(0f) }
     val shape = RoundedCornerShape(12.dp)
     val border = if (view.selected) BorderStroke(3.dp, B6Colors.Accent) else BorderStroke(1.dp, B6Colors.SurfaceHigh)
@@ -78,6 +81,17 @@ fun Pedal(
             .graphicsLayer { translationX = dx }
             .clip(shape)
             .background(B6Colors.Surface)
+            .then(if (wholeDrag) Modifier.pointerInput(index, count, pitchPx) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
+                        dx = 0f
+                        if (target != index) moveTo(target)
+                    },
+                    onDragCancel = { dx = 0f },
+                    onHorizontalDrag = { change, d -> change.consume(); dx += d },
+                )
+            } else Modifier)
             .combinedClickable(onClick = onTap, onLongClick = onLongPress),
     ) {
         val fx = view.fx
@@ -97,25 +111,25 @@ fun Pedal(
                 }
             }
         }
-        // grip strip: horizontal drag moves the pedal
-        Box(
+        // portrait: grip strip (56 dp touch area) moves the pedal; landscape: the whole pedal does
+        if (!wholeDrag) Box(
             Modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(56.dp)
                 .pointerInput(index, count, pitchPx) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
                             dx = 0f
-                            if (target != index) onMoveTo(target)
+                            if (target != index) moveTo(target)
                         },
                         onDragCancel = { dx = 0f },
                         onHorizontalDrag = { change, d -> change.consume(); dx += d },
                     )
                 },
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.TopCenter,
         ) {
-            Box(Modifier.size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
+            Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
         }
         Box(
             Modifier
@@ -126,10 +140,13 @@ fun Pedal(
                 .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
         )
         Box(Modifier.fillMaxSize().drawBehind {
+            val w = border.width.toPx()
             drawRoundRect(
                 if (view.selected) B6Colors.Accent else B6Colors.SurfaceHigh,
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(border.width.toPx()),
+                topLeft = androidx.compose.ui.geometry.Offset(w / 2, w / 2),
+                size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx() - w / 2),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(w),
             )
         })
     }
