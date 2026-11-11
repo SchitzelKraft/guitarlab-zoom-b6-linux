@@ -15,6 +15,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -22,6 +25,7 @@ import nl.b6lab.remote.core.Catalog
 import nl.b6lab.remote.core.Connection
 import nl.b6lab.remote.ui.B6Theme
 import nl.b6lab.remote.ui.BoardScreen
+import nl.b6lab.remote.ui.ChooserScreen
 
 /** Shows the board while a session exists, otherwise a status screen. */
 class MainActivity : ComponentActivity() {
@@ -44,7 +48,12 @@ class MainActivity : ComponentActivity() {
                 val c = controller
                 if (c != null) {
                     val ui by c.ui.collectAsStateWithLifecycle()
-                    BoardScreen(ui, c, onAddEffect = {}, onLongPressPedal = {})
+                    // null = closed; otherwise the replaceSlot the chooser works on (-1 = add at the end)
+                    var chooser by rememberSaveable { mutableStateOf<Int?>(null) }
+                    BoardScreen(ui, c, onAddEffect = { chooser = -1 }, onLongPressPedal = { chooser = it })
+                    chooser?.let { slot ->
+                        ChooserScreen(ui, catalog, c, slot.takeIf { it >= 0 }, onClose = { chooser = null })
+                    }
                     return@B6Theme
                 }
                 Column(

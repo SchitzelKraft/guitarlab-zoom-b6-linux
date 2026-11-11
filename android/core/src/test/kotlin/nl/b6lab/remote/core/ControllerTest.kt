@@ -119,6 +119,22 @@ class ControllerTest {
     }
 
     @Test
+    fun fitsFollowsShownPatch() = runTest {
+        val r = rig()
+        r.p.footswitchTo(57)
+        settle()
+        val edit = r.s.state.value.edit!!
+        val fx = catalog.effects.values.first { catalog.fits(edit, it.fxId) }
+        assertTrue(r.c.fits(fx.fxId, null))
+        r.p.footswitchTo(16)
+        settle()
+        val full = r.s.state.value.edit!!
+        assertEquals(6, full.effects.size)
+        assertFalse(r.c.fits(fx.fxId, null))
+        assertEquals(catalog.fits(full, fx.fxId, 2), r.c.fits(fx.fxId, 2))
+    }
+
+    @Test
     fun nextPatchWraps() = runTest {
         val r = rig()
         r.p.footswitchTo(239)

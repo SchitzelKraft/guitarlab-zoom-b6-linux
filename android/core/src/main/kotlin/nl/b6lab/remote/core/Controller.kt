@@ -132,6 +132,12 @@ class RemoteController(
         }
     }
 
+    /** Whether [fxId] fits the shown patch (as a new entry, or replacing entry [replaceSlot]); false without a patch. */
+    fun fits(fxId: Int, replaceSlot: Int?): Boolean {
+        val edit = synchronized(lock) { lastState.edit } ?: return false
+        return catalog.fits(edit, fxId, replaceSlot)
+    }
+
     fun remove(slot: Int) {
         val ref = synchronized(lock) { shownRef } ?: return
         scope.launch { session.delete(ref, slot) }

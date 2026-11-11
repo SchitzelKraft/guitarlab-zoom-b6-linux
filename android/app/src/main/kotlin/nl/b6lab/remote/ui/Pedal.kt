@@ -41,6 +41,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
+import nl.b6lab.remote.core.EffectInfo
 import nl.b6lab.remote.core.PedalView
 import kotlin.math.roundToInt
 
@@ -51,6 +52,25 @@ fun rememberSvgLoader(): ImageLoader {
 }
 
 private val GREY = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+
+/** The Guitar Lab picture of an effect, or its name on a coloured box when there is no picture. */
+@Composable
+fun EffectPicture(fx: EffectInfo?, loader: ImageLoader, grey: Boolean, modifier: Modifier = Modifier) {
+    if (fx?.svg != null) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current).data("file:///android_asset/${fx.svg}").build(),
+            imageLoader = loader,
+            contentDescription = fx.name,
+            contentScale = ContentScale.Fit,
+            colorFilter = if (grey) GREY else null,
+            modifier = modifier,
+        )
+    } else {
+        Box(modifier.background(B6Colors.SurfaceHigh), Alignment.Center) {
+            Text(fx?.name ?: "?", color = B6Colors.Text, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
 
 /**
  * One pedal. Tap selects or toggles, long press asks for the chooser. Moving uses the grip strip on top (a
@@ -96,20 +116,7 @@ fun Pedal(
     ) {
         val fx = view.fx
         Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.35f)) {
-            if (fx?.svg != null) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current).data("file:///android_asset/${fx.svg}").build(),
-                    imageLoader = loader,
-                    contentDescription = fx.name,
-                    contentScale = ContentScale.Fit,
-                    colorFilter = if (view.on) null else GREY,
-                    modifier = Modifier.fillMaxSize().padding(top = 28.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
-                )
-            } else {
-                Box(Modifier.fillMaxSize().padding(top = 28.dp).background(B6Colors.SurfaceHigh), Alignment.Center) {
-                    Text(fx?.name ?: "?", color = B6Colors.Text, fontSize = 14.sp, textAlign = TextAlign.Center)
-                }
-            }
+            EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 6.dp, start = 4.dp, end = 4.dp))
         }
         // portrait: grip strip (56 dp touch area) moves the pedal; landscape: the whole pedal does
         if (!wholeDrag) Box(
