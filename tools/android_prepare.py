@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from b6lab import library, ptcf  # noqa: E402
+from b6lab import effects, library, ptcf  # noqa: E402
 from b6lab.codec import crc_tail, pack7  # noqa: E402
 from b6lab.midi import B6  # noqa: E402
 
@@ -103,14 +103,71 @@ def ptcf_fixture():
     write_json(FIXTURES, "ptcf.json", records)
 
 
+def _catalog():
+    return effects.load()
+
+
+def format_fixture():
+    """200 (fx_id, index, value, text) from ParamInfo.format_value, over every kind of display."""
+    rng = random.Random(11)
+    cases = []
+    for fx_id, info in sorted(_catalog().items()):
+        for i, prm in enumerate(info.params):
+            top = prm.raw_max if prm.raw_max is not None else 100
+            for v in sorted({0, top, rng.randint(0, max(top, 1))}):
+                cases.append((fx_id, i, v))
+    rng.shuffle(cases)
+    out = [{"fx_id": f, "index": i, "value": v, "text": _catalog()[f].params[i].format_value(v)}
+           for f, i, v in cases[:200]]
+    write_json(FIXTURES, "format.json", out)
+
+
 def fixtures():
+    format_fixture()
     codec_fixture()
     replies_fixture()
     ptcf_fixture()
 
 
+def _svg_name(fx_id):
+    """Guitar Lab SVG module name, as b6lab/gui/editor.py:_module (IR categories: _IR)."""
+    if fx_id >> 24 in effects.IR_CATEGORIES:
+        return "_IR"
+    ranges = json.loads(effects.RANGES_PATH.read_text())
+    rec = ranges.get(f"{fx_id:08X}")
+    return rec["module"][:-4] if rec else None
+
+
+def catalog_json():
+    svg_dir = ROOT / "analysis/win-download/SVG"
+    out, names = {}, set()
+    for fx_id, info in sorted(_catalog().items()):
+        name = _svg_name(fx_id)
+        if name and (svg_dir / f"{name}.svg").exists():
+            names.add(name)
+        else:
+            name = None
+        load = effects.dsp_load(fx_id)
+        out[f"{fx_id:08X}"] = {
+            "name": info.name, "group": info.group,
+            "dsp_load": 0.0 if load is None else float(load),
+            "svg": f"generated/svg/{name}.svg" if name else None,
+            "params": [{"name": q.name, "raw_max": q.raw_max, "display_min": q.display_min,
+                        "display_step": q.display_step, "precision": q.display_precision,
+                        "labels": q.display_labels} for q in info.params]}
+    return out, names, svg_dir
+
+
 def assets():
-    pass  # catalog.json and svg/ are added by later tasks
+    import shutil
+    out, names, svg_dir = catalog_json()
+    gen = ROOT / "android/app/src/main/assets/generated"
+    write_json(gen, "catalog.json", out)
+    write_json(FIXTURES, "catalog.json", out)
+    (gen / "svg").mkdir(parents=True, exist_ok=True)
+    for n in sorted(names):
+        shutil.copyfile(svg_dir / f"{n}.svg", gen / "svg" / f"{n}.svg")
+    print("copied", len(names), "svg files")
 
 
 def main():
