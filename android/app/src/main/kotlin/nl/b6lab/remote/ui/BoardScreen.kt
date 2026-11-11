@@ -51,7 +51,7 @@ private const val PLACES = 6
 
 /**
  * The board. [onAddEffect] gets the entry index of the new place, [onLongPressPedal] the entry index (both open the
- * chooser, wired by the chooser screen).
+ * chooser, wired by the chooser screen). [onReconnect], when given, puts a Reconnect button in the not-connected banner.
  */
 @Composable
 fun BoardScreen(
@@ -60,6 +60,7 @@ fun BoardScreen(
     onAddEffect: (place: Int) -> Unit,
     onLongPressPedal: (slot: Int) -> Unit,
     modifier: Modifier = Modifier,
+    onReconnect: (() -> Unit)? = null,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val loader = rememberSvgLoader()
@@ -74,7 +75,7 @@ fun BoardScreen(
             .padding(horizontal = 12.dp),
     ) {
         Header(ui, controller, landscape)
-        Banners(ui)
+        Banners(ui, onReconnect)
         val pedals: @Composable (Modifier) -> Unit = { m ->
             PedalRow(ui, controller, loader, landscape, onAddEffect, onLongPressPedal, m)
         }
@@ -156,25 +157,36 @@ private fun NavButton(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Banners(ui: BoardUi) {
-    if (!ui.connected) Banner("B6 not connected", B6Colors.Error)
+private fun Banners(ui: BoardUi, onReconnect: (() -> Unit)?) {
+    if (!ui.connected) Banner("B6 not connected", B6Colors.Error, "Reconnect".takeIf { onReconnect != null }, onReconnect)
     if (ui.autoSaveWarning) Banner("AUTO SAVE is on: the pedal stores every change", B6Colors.Warn)
     ui.error?.let { Banner(it, B6Colors.Error) }
 }
 
 @Composable
-private fun Banner(text: String, color: androidx.compose.ui.graphics.Color) {
-    Text(
-        text,
-        color = color,
-        fontSize = 14.sp,
-        modifier = Modifier
+private fun Banner(
+    text: String,
+    color: androidx.compose.ui.graphics.Color,
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Row(
+        Modifier
             .fillMaxWidth()
             .padding(bottom = 6.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(color.copy(alpha = 0.15f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    )
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, color = color, fontSize = 14.sp, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+        if (action != null && onAction != null) {
+            Box(
+                Modifier.height(48.dp).clickable(onClick = onAction).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(action, color = B6Colors.Text, fontSize = 14.sp) }
+        }
+    }
 }
 
 @Composable

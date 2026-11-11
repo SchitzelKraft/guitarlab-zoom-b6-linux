@@ -70,6 +70,9 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
         attempt = ::connectUsb,
     )
 
+    /** A connection run is in progress (the Reconnect button stays hidden meanwhile). */
+    val reconnecting: StateFlow<Boolean> = reconnector.running
+
     private val callback = object : MidiManager.DeviceCallback() {
         override fun onDeviceAdded(info: MidiDeviceInfo) {
             if (UsbMidiTransport.isB6(info)) reconnector.request()
@@ -82,8 +85,16 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
         started = true
         if (!_isDemo.value) _state.value = PedalState(connection = Connection.CONNECTING)
         midi.registerDeviceCallback(callback, Handler(Looper.getMainLooper()))
-        reconnector.request()
+        // after a pending stop's teardown (the lock is fair): otherwise its still connected session makes the
+        // reconnector ignore this request and the teardown then leaves the app at "B6 not connected"
+        scope.launch {
+            lock.withLock { }
+            reconnector.request()
+        }
     }
+
+    /** The user's Reconnect button. */
+    fun reconnect() = reconnector.request()
 
     fun stop() {
         if (!started) return
@@ -141,8 +152,17 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
         val s = B6Session(scope, t)
         transport = t
         session = s
-        stateJob = scope.launch { s.state.collect { _state.value = it } }
-        controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also {
+        stateJob = scope.launch {
+            var was = Connection.DISCONNECTED
+            s.state.collect {
+                _state.value = it
+                // the link was lost (a timeout, the cable still in): try again; our own disconnect clears the error
+                val lost = was == Connection.CONNECTED && it.connection == Connection.DISCONNECTED && it.error != null
+                if (lost && started && !_isDemo.value) reconnector.linkLost()
+                was = it.connection
+            }
+        }
+        controllerScope = CoroutineScope(SupervisorJob(scope.coroutineContext[Job]) + Dispatchers.Main.immediate).also {
             _controller.value = RemoteController(it, s, catalog)
         }
         s.connect()
@@ -155,12 +175,12 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
         } finally {
             controllerScope?.cancel()
             controllerScope = null
+            transport?.close()
+            stateJob?.cancel()
+            session = null
+            transport = null
+            stateJob = null
         }
-        transport?.close()
-        stateJob?.cancel()
-        session = null
-        transport = null
-        stateJob = null
     }
 
 }

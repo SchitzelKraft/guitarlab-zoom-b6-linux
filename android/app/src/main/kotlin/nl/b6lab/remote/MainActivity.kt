@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
             val state by pedal.state.collectAsStateWithLifecycle()
             val isDemo by pedal.isDemo.collectAsStateWithLifecycle()
             val controller by pedal.controller.collectAsStateWithLifecycle()
+            val reconnecting by pedal.reconnecting.collectAsStateWithLifecycle()
             B6Theme {
                 val color = MaterialTheme.colorScheme.onBackground
                 val c = controller
@@ -69,6 +70,7 @@ class MainActivity : ComponentActivity() {
                         ui, c,
                         onAddEffect = { c.currentRef()?.let { chooser = ChooserTarget(it, -1) } },
                         onLongPressPedal = { slot -> c.currentRef()?.let { chooser = ChooserTarget(it, slot) } },
+                        onReconnect = if (isDemo || reconnecting) null else ({ pedal.reconnect() }),
                     )
                     chooser?.let { t ->
                         val now = c.currentRef()

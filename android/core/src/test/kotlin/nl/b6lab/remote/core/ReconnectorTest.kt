@@ -7,6 +7,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -72,6 +74,67 @@ class ReconnectorTest {
         f.reconnector.request()
         advanceUntilIdle()
         assertEquals(1, f.calls)
+    }
+
+    @Test
+    fun lostLinkReconnects() = runTest {
+        val f = Fixture(this, listOf(true, true))
+        f.reconnector.request()
+        advanceUntilIdle()
+        f.connected = false // a timeout with the cable still in
+        f.reconnector.linkLost()
+        advanceUntilIdle()
+        assertEquals(2, f.calls)
+        assertTrue(f.connected)
+    }
+
+    @Test
+    fun lostLinkWithoutDeviceDoesNothing() = runTest {
+        val f = Fixture(this, emptyList(), present = false)
+        f.reconnector.linkLost()
+        advanceUntilIdle()
+        assertEquals(0, f.calls)
+    }
+
+    @Test
+    fun lostLinksShareFourAttemptsUntilRequest() = runTest {
+        // every attempt connects, every connection is lost again: 4 automatic attempts, then only a request
+        val f = Fixture(this, List(20) { true })
+        repeat(6) {
+            f.connected = false
+            f.reconnector.linkLost()
+            advanceUntilIdle()
+        }
+        assertEquals(4, f.calls)
+        f.connected = false
+        f.reconnector.request()
+        advanceUntilIdle()
+        assertEquals(5, f.calls)
+        f.connected = false
+        f.reconnector.linkLost()
+        advanceUntilIdle()
+        assertEquals(6, f.calls)
+    }
+
+    @Test
+    fun failedLostLinkRunStopsAtFour() = runTest {
+        val f = Fixture(this, emptyList())
+        f.reconnector.linkLost()
+        advanceUntilIdle()
+        f.reconnector.linkLost()
+        advanceUntilIdle()
+        assertEquals(4, f.calls)
+    }
+
+    @Test
+    fun runningWhileTrying() = runTest {
+        val f = Fixture(this, listOf(false, true))
+        assertFalse(f.reconnector.running.value)
+        f.reconnector.request()
+        runCurrent()
+        assertTrue(f.reconnector.running.value)
+        advanceUntilIdle()
+        assertFalse(f.reconnector.running.value)
     }
 
     @Test
