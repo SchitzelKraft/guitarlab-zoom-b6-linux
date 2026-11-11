@@ -5,7 +5,7 @@ Two free apps for the Zoom B6 bass multi-effects pedal, made because Zoom's own 
 
 | App | Runs on | What it is for | How to get it |
 |---|---|---|---|
-| **B6 Lab** | Linux desktop | Full editor: all 240 patches, effects, knobs, names, import/export, backups | Run from this repository (see below) |
+| **B6 Lab** | Linux desktop | Full editor: all 240 patches, effects, knobs, names, patch search, import/export, backups | Run from this repository (see below) |
 | **B6 Remote** | Android phone | Live editing of the active patch from a phone on a mic stand, for practice and on stage | Download the APK from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases) |
 
 Both talk to the pedal over a USB cable; no Zoom drivers are needed. They share the same
@@ -16,6 +16,8 @@ pedal protocol work and the same data files (see [Data files](#data-files-not-in
 B6 Lab talks to the pedal over USB MIDI (raw ALSA, no extra drivers) and lets you browse all
 240 patch slots, switch the pedal to a slot, edit effect on/off and knobs, rename patches,
 import and export `.zptc` files, and save back to the pedal with an automatic backup.
+The search field above the patch list (Ctrl+F) finds a patch by number (Z-104 or 104), name
+or effect name; Enter or a click switches the pedal to it.
 
 <p>
   <img src="docs/desktop/editor.png" alt="B6 Lab editor: the effect chain of a patch with all knobs" width="760">
@@ -38,7 +40,7 @@ Only one program can hold the pedal's MIDI port at a time; close other editors a
 
 ## B6 Remote: Android app (APK)
 
-B6 Remote is a separate Android app (an APK you install on the phone). It edits the active patch of a Zoom B6 live over a USB cable (OTG), for practice and on stage. It shows a pedal board with the effect pictures, on/off footswitches and knobs; you can add, change, remove and move effects and save the patch. It follows patch changes you make on the pedal, and works in portrait and landscape.
+B6 Remote is a separate Android app (an APK you install on the phone). It edits the active patch of a Zoom B6 live over a USB cable (OTG), for practice and on stage. It shows a pedal board with the effect pictures, on/off footswitches and knobs; you can add, change, remove and move effects and save the patch. It follows patch changes you make on the pedal, and works in portrait and landscape. The search button next to the patch arrows finds a patch by number (Z-104 or 104), name or effect name; tap a result and the pedal switches to it.
 
 <p>
   <img src="docs/android/portrait.png" alt="B6 Remote in portrait" width="230">
@@ -50,7 +52,7 @@ B6 Remote is a separate Android app (an APK you install on the phone). It edits 
 
 ### Download and install
 
-Download `B6Remote-1.0.apk` from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
+Download `B6Remote-1.1.apk` from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
 
 ### Requirements
 
