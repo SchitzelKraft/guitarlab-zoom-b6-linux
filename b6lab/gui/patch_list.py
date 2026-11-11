@@ -9,9 +9,10 @@ COLUMNS = ["Patch Number", "Patch Name", "Comment"]
 
 
 def slot_label(slot):
-    """Guitar Lab's patch number: A-001 .. Z-104, then AA-105 .. AD-120 (seen in Guitar Lab)."""
+    """The B6's patch number: banks A..Z, AA..AZ, BA..BH (60 banks of 4), then the patch
+    number 001-240: A-001 .. Z-104, AA-105 .. AZ-208, BA-209 .. BH-240."""
     bank = slot // 4
-    letters = chr(65 + bank) if bank < 26 else "A" + chr(65 + bank - 26)
+    letters = chr(65 + bank) if bank < 26 else chr(64 + bank // 26) + chr(65 + bank % 26)
     return f"{letters}-{slot + 1:03d}"
 
 
