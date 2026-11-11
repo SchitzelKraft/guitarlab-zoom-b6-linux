@@ -3,6 +3,7 @@ package nl.b6lab.remote.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 enum class Connection { DISCONNECTED, CONNECTING, CONNECTED }
@@ -66,6 +68,8 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         private val UNSOLICITED_DUMP = HDR + byteArrayOf(0x64, 0x12, 0x00)
         private val EDIT_DUMP = HDR + byteArrayOf(0x64, 0x12)
         private val GLOBAL_REPLY = HDR + byteArrayOf(0x64, 0x09)
+        /** Any stored-patch answer (`45`): b6lab/midi.py store_edit waits for this prefix only. */
+        private val STORE_REPLY = HDR + byteArrayOf(0x45)
         private val RESPONSE = HDR + byteArrayOf(0x00)
         private const val BUSY = 0x11
         private const val SLOT_SIZE = 808
@@ -100,7 +104,14 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     @Volatile private var ended = false
     /** Parent of the read loop, the push followers and the poller. */
     private val work = SupervisorJob(scope.coroutineContext[Job])
-    private val patchPushes = Channel<Int>(Channel.UNLIMITED)
+    /** Patch-change pushes: (number of the push, slot). */
+    private val patchPushes = Channel<Pair<Int, Int>>(Channel.UNLIMITED)
+
+    /** Patch-change pushes counted by the read loop as they arrive (no mutex needed), and how many are loaded. */
+    @Volatile private var pushesArrived = 0
+    @Volatile private var pushesLoaded = 0
+    /** The slot of the last patch-change push, or of our own [selectSlot]; null before either. */
+    @Volatile private var pushedSlot: Int? = null
     private val paramPushes = Channel<Unit>(Channel.CONFLATED)
 
     // ---- public operations ------------------------------------------------------------------
@@ -155,6 +166,8 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     /** Bank select + program change, then the new patch is read. Unsaved changes are dropped. */
     suspend fun selectSlot(slot: Int) = op {
+        // the pedal follows our own selection, whether or not it announces it with a push
+        pushedSlot = slot
         sendAll(Msg.selectSlot(slot))
         load(slot)
     }
@@ -204,16 +217,18 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     }
 
     /**
-     * Patch Save (`64 0D`) into [expected]'s slot, only when the pedal (`33` and the edit buffer) is still on that
-     * patch; the `46` read-back must equal the edit buffer.
+     * Patch Save (`64 0D`) into [expected]'s slot, only when the pedal (`33`, the edit buffer and the pushes) is still
+     * on that patch; the `46` read-back must equal the edit buffer as checked before the store. In PC mode an
+     * unanswered store is refused ("save not confirmed"), it does not end the link.
      */
     suspend fun save(expected: PatchRef) = op {
         checkRef(expected)
         val slot = expected.slot
         if (selectedSlot() != slot) throw Refused(PATCH_CHANGED)
-        checkedEdit(expected)
+        val before = checkedEdit(expected)
+        checkPushes(expected)
         if (_state.value.pcMode) {
-            sysexRequest(Msg.store(slot), slotReply(slot), STORE_TIMEOUT_MS)
+            sysexRequest(Msg.store(slot), STORE_REPLY, STORE_TIMEOUT_MS) { Refused("save not confirmed") }
         } else {
             send(Msg.store(slot))
         }
@@ -221,7 +236,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         val edit = readEdit()
         stored = readStored(slot)
         setEdit(edit)
-        if (!Ptcf.samePatch(edit.raw, stored!!)) throw Refused("save failed")
+        if (!Ptcf.samePatch(before.raw, stored!!)) throw Refused("save failed")
     }
 
     // ---- operation framework ----------------------------------------------------------------
@@ -273,6 +288,15 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     /** Refuses at once (nothing sent) when the session already knows the pedal moved on from [expected]. */
     private fun checkRef(expected: PatchRef) {
         if (_state.value.ref != expected) throw Refused(PATCH_CHANGED)
+        checkPushes(expected)
+    }
+
+    /**
+     * Refuses when a patch-change push has arrived that is not loaded yet, or the last one named another slot: the
+     * state may still show the old patch (a patch with the same effects passes the ID check).
+     */
+    private fun checkPushes(expected: PatchRef) {
+        if (pushesArrived != pushesLoaded || (pushedSlot ?: expected.slot) != expected.slot) throw Refused(PATCH_CHANGED)
     }
 
     /** The edit buffer, read now; refuses (after showing it) when the pedal is on another patch than [expected]. */
@@ -282,6 +306,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
             setEdit(now)
             throw Refused(PATCH_CHANGED)
         }
+        checkPushes(expected)
         return now
     }
 
@@ -322,8 +347,11 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         throw Refused("the pedal did not switch the effect")
     }
 
-    /** b6lab/midi.py press_effect: position + 5A press, wait, position + 5A release, wait. */
-    private suspend fun press(pos: Int) {
+    /**
+     * b6lab/midi.py press_effect: position + 5A press, wait, position + 5A release, wait. Not cancellable: a cancel
+     * must never leave the virtual footswitch pressed.
+     */
+    private suspend fun press(pos: Int) = withContext(NonCancellable) {
         Msg.pressEffect(pos).chunked(2).forEach { pair ->
             sendAll(pair)
             delay(PRESS_WAIT_MS)
@@ -333,7 +361,15 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     // ---- following the pedal ----------------------------------------------------------------
 
     private fun startFollowing() {
-        scope.launch(work) { for (slot in patchPushes) background { load(slot) } }
+        scope.launch(work) {
+            for ((n, slot) in patchPushes) background {
+                try {
+                    load(slot)
+                } finally {
+                    pushesLoaded = n
+                }
+            }
+        }
         scope.launch(work) {
             while (true) {
                 paramPushes.receive()
@@ -401,7 +437,12 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
             return
         }
         when (val push = parsePush(m)) {
-            is Push.PatchChanged -> patchPushes.trySend(push.slot)
+            is Push.PatchChanged -> {
+                // recorded at once (operations check it), loaded later under the mutex; only this loop writes these
+                pushedSlot = push.slot
+                pushesArrived += 1
+                patchPushes.trySend(pushesArrived to push.slot)
+            }
             is Push.ParamChanged -> paramPushes.trySend(Unit)
             is Push.Other -> if (body != null && body.startsWith(UNSOLICITED_DUMP)) applyDump(body)
             else -> Unit
@@ -440,10 +481,11 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         }
     }
 
-    /** Sends [body] and hands the accepted replies to [collect], within [timeoutMs]. */
+    /** Sends [body] and hands the accepted replies to [collect], within [timeoutMs]; then throws [onTimeout]. */
     private suspend fun <T : Any> exchange(
         body: ByteArray,
         timeoutMs: Long = REQUEST_TIMEOUT_MS,
+        onTimeout: () -> Exception = { LinkLost("pedal not responding") },
         accept: (MidiMessage) -> Boolean,
         collect: suspend (ReceiveChannel<MidiMessage>) -> T,
     ): T {
@@ -451,7 +493,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         pending = p
         try {
             send(body)
-            return withTimeoutOrNull(timeoutMs) { collect(p.replies) } ?: throw LinkLost("pedal not responding")
+            return withTimeoutOrNull(timeoutMs) { collect(p.replies) } ?: throw onTimeout()
         } catch (e: ClosedReceiveChannelException) {
             throw LinkLost("pedal disconnected")
         } finally {
@@ -460,8 +502,13 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     }
 
     /** A SysEx request answered by a message starting with [prefix]; an error response fails it (B6.request). */
-    private suspend fun sysexRequest(body: ByteArray, prefix: ByteArray, timeoutMs: Long = REQUEST_TIMEOUT_MS): ByteArray =
-        exchange(body, timeoutMs, { m -> m is MidiMessage.Sysex && (m.body.startsWith(prefix) || isError(m.body)) }) {
+    private suspend fun sysexRequest(
+        body: ByteArray,
+        prefix: ByteArray,
+        timeoutMs: Long = REQUEST_TIMEOUT_MS,
+        onTimeout: () -> Exception = { LinkLost("pedal not responding") },
+    ): ByteArray =
+        exchange(body, timeoutMs, onTimeout, { m -> m is MidiMessage.Sysex && (m.body.startsWith(prefix) || isError(m.body)) }) {
             val reply = (it.receive() as MidiMessage.Sysex).body
             if (!reply.startsWith(prefix)) throw Refused("pedal returned error 0x%02X".format(reply[4].toInt() and 0xFF))
             reply

@@ -70,7 +70,8 @@ fun parsePush(m: MidiMessage): Push? {
     if (at(3) == 0x64 && at(4) == 0x26 && body.size >= 10) {
         return Push.PatchChanged(at(7) * 4 + at(9))
     }
-    if (at(3) == 0x64 && at(4) == 0x20 && body.size >= 13) {
+    // 64 20 00: an edit made on the pedal; 64 20 01: the pedal's echo of our own edit (Other)
+    if (at(3) == 0x64 && at(4) == 0x20 && body.size >= 13 && at(5) == 0x00) {
         val module = at(6)
         return Push.ParamChanged(module, module, at(7), Codec.from7(body, 8, 5).toInt())
     }
@@ -81,6 +82,8 @@ fun parsePush(m: MidiMessage): Push? {
 fun parseAutoSave(globalReply: ByteArray): Boolean = globalReply.size > 12 && globalReply[12].toInt() != 0
 
 object Safety {
+    private val GLOBAL_PARAMS = setOf(0x01, 0x07, 0x08, 0x09)
+
     /** Throws when [body] is a SysEx body that must never reach the pedal. */
     fun check(body: ByteArray) {
         fun at(i: Int) = body[i].toInt() and 0xFF
@@ -105,6 +108,9 @@ object Safety {
                 // 64 20 00 <module> <param> ...: param 0 is direct on/off, only the 5A press is allowed
                 if (body.size < 8) deny("short parameter message")
                 if (at(7) == 0x00 && at(6) != 0x5A) deny("direct on/off")
+                // module 0x64: only what B6 Lab sends (01 position, 07 add, 08 delete, 09 move); never 0F (AUTO
+                // SAVE), 02 (tempo) or anything else
+                if (at(6) == 0x64 && at(7) !in GLOBAL_PARAMS) deny("64 20 00 64 ${"%02x".format(at(7))}")
             }
         }
     }

@@ -86,6 +86,38 @@ class MessagesTest {
     }
 
     @Test
+    fun globalModuleOnlyB6LabParams() {
+        // module 0x64: only position (01), add (07), delete (08) and move (09) as B6 Lab sends them
+        for (param in (0..0x7F) - setOf(1, 7, 8, 9)) {
+            val body = hex("52 00 6e 64 20 00 64") + byteArrayOf(param.toByte(), 1, 0, 0, 0, 0)
+            try {
+                Safety.check(body)
+                fail("not blocked: 64 param $param")
+            } catch (e: IllegalStateException) {
+            }
+        }
+        // AUTO SAVE write and tempo by name
+        for (s in listOf("52 00 6e 64 20 00 64 0f 00 00 00 00 00", "52 00 6e 64 20 00 64 02 78 00 00 00 00")) {
+            try {
+                Safety.check(hex(s))
+                fail("not blocked: $s")
+            } catch (e: IllegalStateException) {
+            }
+        }
+        (Msg.pressEffect(0) + Msg.setParam(0, 0, 1) + Msg.changeType(0, 1) +
+            listOf(Msg.insertEffect(0), Msg.deleteEffect(0), Msg.moveEffect(0, 5))).forEach { Safety.check(it) }
+    }
+
+    @Test
+    fun echoesAreNotPedalEdits() {
+        fun push(s: String) = parsePush(MidiMessage.Sysex(hex(s)))
+        // byte 5 = 01: the pedal echoes our own edit; only 00 is an edit made on the pedal
+        assertTrue(push("52 00 6e 64 20 01 02 04 63 00 00 00 00") is Push.Other)
+        assertTrue(push("52 00 6e 64 20 01 64 01 02 00 00 00 00") is Push.Other)
+        assertEquals(Push.ParamChanged(2, 2, 4, 99), push("52 00 6e 64 20 00 02 04 63 00 00 00 00"))
+    }
+
+    @Test
     fun builderRangeChecks() {
         val bad = listOf<() -> Any>({ Msg.setParam(6, 0, 0) }, { Msg.setParam(0, 126, 0) }, { Msg.selectSlot(240) },
             { Msg.selectSlot(512) }, { Msg.readPatch(-1) }, { Msg.store(240) }, { Msg.changeType(0, 0x20000000) },

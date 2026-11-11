@@ -1,5 +1,6 @@
 package nl.b6lab.remote.core
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -37,6 +38,37 @@ class SessionTest {
 
     private fun TestScope.session(p: MidiTransport) = B6Session(backgroundScope, p)
 
+    /**
+     * A [FakePedal] with hooks on the wire: [beforeSend] / [afterSend] run before / after the pedal gets a message,
+     * [filter] edits or drops replies.
+     */
+    private class Tap(val p: FakePedal, scope: CoroutineScope) : MidiTransport {
+        var beforeSend: (ByteArray) -> Unit = {}
+        var afterSend: (ByteArray) -> Unit = {}
+        var filter: (MidiMessage) -> MidiMessage? = { it }
+        private val ch = Channel<MidiMessage>(Channel.UNLIMITED)
+
+        init {
+            scope.launch {
+                for (m in p.incoming) filter(m)?.let { ch.trySend(it) }
+                ch.close()
+            }
+        }
+
+        override fun send(bytes: ByteArray) {
+            beforeSend(bytes)
+            p.send(bytes)
+            afterSend(bytes)
+        }
+
+        override val incoming: ReceiveChannel<MidiMessage> get() = ch
+        override fun close() = p.close()
+    }
+
+    /** A framed Patch Save (`F0 52 00 6E 64 0D ...`). */
+    private fun isStore(b: ByteArray) = b.size > 6 && b[4].toInt() == 0x64 && b[5].toInt() == 0x0D
+    private fun isStoreReply(m: MidiMessage) = m is MidiMessage.Sysex && m.body.size > 4 && m.body[3].toInt() == 0x45
+
     private val B6Session.ref: PatchRef get() = state.value.ref!!
 
     private fun ids(p: Patch?) = p!!.effects.map { it.fxId }
@@ -45,6 +77,11 @@ class SessionTest {
     private fun count(p: FakePedal, body: ByteArray) = p.sent.count { it.contentEquals(framed(body)) }
     private fun isFootswitch(b: ByteArray) =
         b.size >= 8 && (b[3].toInt() == 0x64) && b[4].toInt() == 0x20 && (b[6].toInt() and 0xFF) == 0x5A
+
+    private fun TestScope.settle() {
+        advanceTimeBy(1000)
+        runCurrent()
+    }
 
     @Test
     fun connectsInPcMode() = runTest {
@@ -239,6 +276,120 @@ class SessionTest {
         s.save(shown)
         assertEquals("patch changed on the pedal", s.state.value.error)
         assertEquals(0, count(p, Msg.store(0)) + count(p, Msg.store(1)))
+    }
+
+    @Test
+    fun footswitchToIdenticalChainRefused() = runTest {
+        // slot 1 holds the same effects as slot 0: only the patch-change push tells them apart
+        val ops: List<suspend (B6Session, PatchRef) -> Unit> = listOf(
+            { s, r -> s.toggle(r, 0) },
+            { s, r -> s.changeType(r, 0, 0x5890011) },
+            { s, r -> s.insert(r, 0) },
+            { s, r -> s.delete(r, 0) },
+            { s, r -> s.move(r, 0, 2) },
+            { s, r -> s.save(r) },
+        )
+        for (op in ops) {
+            val p = FakePedal(listOf(image(0), image(0)))
+            val s = session(p)
+            s.connect()
+            val shown = s.ref
+            p.footswitchTo(1) // the push arrives while the operation reads the edit buffer
+            val n = p.sent.size
+            op(s, shown)
+            assertEquals("patch changed on the pedal", s.state.value.error)
+            val after = sentBodies(p).drop(n).map { it.toList() }
+            assertTrue(after.toString(), after.all { it == Msg.READ_EDIT.toList() || it == Msg.ACK.toList() || it == Msg.SELECTED.toList() })
+            assertTrue(Ptcf.samePatch(p.editBuffer(), image(0)))
+            assertTrue(Ptcf.samePatch(p.storedSlot(0), image(0)))
+            settle()
+            assertEquals(1, s.state.value.slot)
+        }
+    }
+
+    @Test
+    fun knobRefusedWhilePatchPushWaits() = runTest {
+        val p = FakePedal(listOf(image(0), image(0)))
+        val s = session(p)
+        s.connect()
+        val shown = s.ref
+        // a toggle holds the session (press waits); a knob step queues behind it
+        launch { s.toggle(shown, 2) }
+        runCurrent()
+        launch { s.setKnob(shown, 0, 0, 10) }
+        runCurrent()
+        // the footswitch push arrives, but is applied only after the knob step
+        p.footswitchTo(1)
+        runCurrent()
+        settle()
+        assertEquals(0, count(p, Msg.setParam(0, 0, 10)[1]))
+        assertNotEquals(10, editOf(p).effects[0].params[0])
+        assertEquals(1, s.state.value.slot)
+    }
+
+    @Test
+    fun saveComparesStoredWithCheckedBuffer() = runTest {
+        val p = pedal()
+        val t = Tap(p, backgroundScope)
+        val s = session(t)
+        s.connect()
+        s.setKnob(s.ref, 0, 0, 5)
+        // a knob is turned on the pedal between the check and the store: what is stored (and read back from the
+        // edit buffer) is not what was checked
+        t.beforeSend = { if (isStore(it)) p.turnKnob(0, 1, 77) }
+        s.save(s.ref)
+        assertEquals("save failed", s.state.value.error)
+        assertEquals(Connection.CONNECTED, s.state.value.connection)
+    }
+
+    @Test
+    fun saveAcceptsAnyStoreReply() = runTest {
+        val p = pedal()
+        val t = Tap(p, backgroundScope)
+        val s = session(t)
+        s.connect()
+        s.setKnob(s.ref, 0, 0, 5)
+        var storing = false
+        t.afterSend = { if (isStore(it)) storing = true }
+        t.filter = { m ->
+            if (storing && isStoreReply(m)) {
+                storing = false
+                // other slot bytes than asked for: B6 Lab (store_edit) waits for any 45
+                MidiMessage.Sysex((m as MidiMessage.Sysex).body.copyOf().also { it[5] = 0x11 })
+            } else m
+        }
+        s.save(s.ref)
+        assertNull(s.state.value.error)
+        assertFalse(s.state.value.dirty)
+        assertEquals(Connection.CONNECTED, s.state.value.connection)
+    }
+
+    @Test
+    fun unconfirmedSaveIsARefusal() = runTest {
+        val p = pedal()
+        val t = Tap(p, backgroundScope)
+        val s = session(t)
+        s.connect()
+        s.setKnob(s.ref, 0, 0, 5)
+        var storing = false
+        t.afterSend = { if (isStore(it)) storing = true }
+        t.filter = { m -> if (storing && isStoreReply(m)) null else m }
+        s.save(s.ref)
+        assertEquals("save not confirmed", s.state.value.error)
+        assertEquals(Connection.CONNECTED, s.state.value.connection)
+    }
+
+    @Test
+    fun cancelledToggleStillReleases() = runTest {
+        val p = pedal()
+        val s = session(p)
+        s.connect()
+        val job = launch { s.toggle(s.ref, 2) }
+        runCurrent() // inside the wait after the press
+        job.cancel()
+        settle()
+        val presses = sentBodies(p).filter { isFootswitch(it) }.map { it.toList() }
+        assertEquals(Msg.pressEffect(2).filter { isFootswitch(it) }.map { it.toList() }, presses)
     }
 
     @Test
