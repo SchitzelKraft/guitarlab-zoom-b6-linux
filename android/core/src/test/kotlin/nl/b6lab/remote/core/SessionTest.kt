@@ -380,6 +380,54 @@ class SessionTest {
     }
 
     @Test
+    fun addInsertsAndSetsTypeInOneGo() = runTest {
+        val p = pedal()
+        val s = session(p)
+        s.connect()
+        s.selectSlot(57)
+        val n = s.state.value.edit!!.effects.size
+        val before = p.sent.size
+        s.add(s.ref, n, 0x5890011)
+        assertNull(s.state.value.error)
+        assertEquals(n + 1, s.state.value.edit!!.effects.size)
+        assertEquals(0x5890011, s.state.value.edit!!.effects[n].fxId)
+        assertEquals(ids(editOf(p)), ids(s.state.value.edit))
+        val sent = sentBodies(p).drop(before).filter { it.size > 4 && it[3].toInt() == 0x64 && it[4].toInt() == 0x20 }
+        assertEquals((listOf(Msg.insertEffect(n)) + Msg.changeType(n, 0x5890011)).map { it.toList() }, sent.map { it.toList() })
+    }
+
+    @Test
+    fun addStopsWhenPatchChangesBeforeTypeChange() = runTest {
+        // slot 1: the chain of slot 0 with an empty entry at the end, exactly what the add would leave
+        val withBlank = Ptcf.encode(Ptcf.insertEntry(Ptcf.parse(image(0)), 5)!!)
+        val p = FakePedal(listOf(image(0), withBlank))
+        val t = Tap(p, backgroundScope)
+        val s = session(t)
+        s.connect()
+        val shown = s.ref
+        // the footswitch is pressed right after the pedal added the entry
+        t.afterSend = { if (it.size > 7 && it[5].toInt() == 0x20 && it[8].toInt() == 0x07) p.footswitchTo(1) }
+        s.add(shown, 5, 0x5890011)
+        assertEquals("patch changed on the pedal", s.state.value.error)
+        assertEquals(0, sentBodies(p).count { b -> Msg.changeType(5, 0x5890011).any { it.contentEquals(b) } })
+        assertTrue(Ptcf.samePatch(p.editBuffer(), withBlank.copyOf(808)))
+        settle()
+        assertEquals(1, s.state.value.slot)
+    }
+
+    @Test
+    fun addRefusedWhenFull() = runTest {
+        val p = pedal()
+        val s = session(p)
+        s.connect()
+        s.selectSlot(16)
+        s.add(s.ref, 6, 0x5890011)
+        assertNotNull(s.state.value.error)
+        assertEquals(Connection.CONNECTED, s.state.value.connection)
+        assertTrue(sentBodies(p).none { b -> Msg.changeType(5, 0x5890011).drop(1).any { it.contentEquals(b) } })
+    }
+
+    @Test
     fun cancelledToggleStillReleases() = runTest {
         val p = pedal()
         val s = session(p)

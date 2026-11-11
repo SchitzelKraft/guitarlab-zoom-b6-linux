@@ -203,6 +203,27 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         delay(EDIT_WAIT_MS)
     }
 
+    /**
+     * Adds effect [fxId] at entry [pos] (b6lab/live.py: insert an empty entry, then change its type) under one hold
+     * of the session: the type change goes out only when the buffer after the insert is [expected]'s chain with an
+     * empty entry at [pos] and no patch-change push came in.
+     */
+    suspend fun add(expected: PatchRef, pos: Int, fxId: Int) = op {
+        checkRef(expected)
+        val before = checkedEdit(expected)
+        if (pos !in 0..before.effects.size) throw Refused("no place $pos")
+        send(Msg.insertEffect(pos))
+        delay(EDIT_WAIT_MS)
+        val added = readEdit()
+        setEdit(added)
+        checkPushes(expected)
+        if (added.effects.size == before.effects.size) throw Refused("the pedal refused to add an effect")
+        if (added.effects.map { it.fxId } != expected.fxIds.toMutableList().apply { add(pos, 0) }) throw Refused(PATCH_CHANGED)
+        sendAll(Msg.changeType(pos, fxId))
+        delay(EDIT_WAIT_MS)
+        setEdit(readEdit())
+    }
+
     suspend fun delete(expected: PatchRef, slot: Int) = chainEdit(
         expected,
         verify = { before, after -> if (after.effects.size == before.effects.size) "the pedal did not delete the effect" else null },

@@ -116,21 +116,18 @@ class RemoteController(
     /** With [replaceSlot] changes that entry's type, otherwise adds [fxId] at the end of the chain. */
     fun choose(fxId: Int, replaceSlot: Int?, expected: PatchRef? = null) {
         if (!fits(fxId, replaceSlot)) return
-        val (shown, count) = synchronized(lock) { shownRef to (lastState.edit?.effects?.size ?: 0) }
-        val ref = expected ?: shown
-        if (ref == null) return
+        val ref = expected ?: synchronized(lock) { shownRef } ?: return
         scope.launch {
             if (replaceSlot != null) {
                 session.changeType(ref, replaceSlot, fxId)
                 return@launch
             }
-            session.insert(ref, count)
+            // at the end of the chain the screen showed: insert and type change in one session operation
+            val count = ref.fxIds.size
+            session.add(ref, count, fxId)
             if (session.state.value.error != null) return@launch
-            // the chain changed by our own insert: continue from the session's new state
-            val now = session.state.value.ref ?: return@launch
-            session.changeType(now, count, fxId)
             synchronized(lock) {
-                if (lastState.ref?.slot == now.slot && _ui.value.pedals.any { it.slot == count }) {
+                if (lastState.ref?.slot == ref.slot && _ui.value.pedals.any { it.slot == count }) {
                     selected = count
                     publish()
                 }
@@ -152,9 +149,22 @@ class RemoteController(
         scope.launch { session.delete(ref, slot) }
     }
 
-    fun move(src: Int, dst: Int) {
-        val ref = synchronized(lock) { shownRef } ?: return
-        scope.launch { session.move(ref, src, dst) }
+    /**
+     * Moves the pedal at entry [srcSlot] to place [dropIndex] among the shown pedals (0 until pedals.size, the order
+     * on screen). Like b6lab/gui/editor.py (_drop_index): the pedal goes to the entry index that is the sum of the
+     * entries (2 for a double-width effect) of the shown pedals before the drop place, the moved one left out.
+     */
+    fun movePedal(srcSlot: Int, dropIndex: Int) {
+        val (ref, dst) = synchronized(lock) {
+            val ref = shownRef ?: return
+            val effects = lastState.edit?.effects ?: return
+            val shown = effects.filter { !it.isTail }
+            val from = shown.indexOfFirst { it.slot == srcSlot }
+            if (from < 0 || dropIndex !in shown.indices || dropIndex == from) return
+            val span = { slot: Int -> if (slot + 1 < effects.size && effects[slot + 1].isTail) 2 else 1 }
+            ref to shown.filter { it.slot != srcSlot }.take(dropIndex).sumOf { span(it.slot) }
+        }
+        scope.launch { session.move(ref, srcSlot, dst) }
     }
 
     fun previousPatch() = step(-1)

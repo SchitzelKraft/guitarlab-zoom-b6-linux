@@ -350,6 +350,47 @@ class ControllerTest {
     }
 
     @Test
+    fun movePedalSendsB6LabEntryIndex() = runTest {
+        // SVT Drive: A (wide, entries 0-1), B (wide, 2-3), C (single, 4)
+        val r = rig()
+        val start = r.s.state.value.edit!!
+        assertEquals(listOf(false, true, false, true, false), start.effects.map { it.isTail })
+        val (a, b, c) = start.effects.filter { !it.isTail }.map { it.fxId }
+        fun heads() = Ptcf.parse(r.p.editBuffer()).effects.filter { !it.isTail }.map { it.fxId }
+        fun tails() = Ptcf.parse(r.p.editBuffer()).effects.map { it.isTail }
+        fun moved(src: Int, dst: Int) = r.p.sent.count { it.contentEquals(framed(Msg.moveEffect(src, dst))) }
+        // (shown pedals, drag source entry, drop index) -> the 64 09 <src> <dst> B6 Lab sends, and the new order
+        r.c.movePedal(4, 1) // single C back over wide B: entries of A = 2
+        settle()
+        assertEquals(1, moved(4, 2))
+        assertEquals(listOf(a, c, b), heads())
+        r.c.movePedal(2, 0) // C to the front
+        settle()
+        assertEquals(1, moved(2, 0))
+        assertEquals(listOf(c, a, b), heads())
+        r.c.movePedal(0, 1) // single C forward over wide A: entries of A = 2 (not A's entry index 1)
+        settle()
+        assertEquals(1, moved(0, 2))
+        assertEquals(listOf(a, c, b), heads())
+        assertEquals(listOf(false, true, false, false, true), tails())
+        r.c.movePedal(0, 2) // wide A forward over C and wide B: 1 + 2 entries
+        settle()
+        assertEquals(1, moved(0, 3))
+        assertEquals(listOf(c, b, a), heads())
+        r.c.movePedal(3, 1) // wide A back over wide B: entries of C = 1
+        settle()
+        assertEquals(1, moved(3, 1))
+        assertEquals(listOf(c, a, b), heads())
+        assertEquals(listOf(false, false, true, false, true), tails())
+        // back where it was: nothing sent
+        val n = r.p.sent.size
+        r.c.movePedal(1, 1)
+        settle()
+        assertEquals(n, r.p.sent.size)
+        assertNull(r.c.ui.value.error)
+    }
+
+    @Test
     fun tapOnUnknownPedalIgnored() = runTest {
         val r = rig()
         r.c.tapPedal(1)

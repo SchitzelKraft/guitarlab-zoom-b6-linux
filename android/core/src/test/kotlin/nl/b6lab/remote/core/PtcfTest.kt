@@ -83,6 +83,26 @@ class PtcfTest {
     }
 
     @Test
+    fun wideChainEditsMatchPython() {
+        val o = record(-1)
+        val p = Ptcf.parse(raw(o))
+        val cases = o["wide_edits"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(10, cases.size)
+        for (c in cases) {
+            val op = c["op"]!!.jsonPrimitive.content
+            val args = c["args"]!!.jsonArray.map { it.jsonPrimitive.int }
+            val got = when (op) {
+                "move_entry" -> Ptcf.moveEntry(p, args[0], args[1])
+                "delete_entry" -> Ptcf.deleteEntry(p, args[0])
+                else -> throw AssertionError("unknown op $op")
+            }
+            val expected = c["encoded"]!!
+            if (expected is JsonNull) assertNull("$op $args", got)
+            else assertArrayEquals("$op $args", hex(expected.jsonPrimitive.content), Ptcf.encode(got!!))
+        }
+    }
+
+    @Test
     fun positionCountsTails() {
         val p = Ptcf.parse(raw(record(-1)))
         assertEquals(listOf(false, true, false, true, false), p.effects.map { it.isTail })

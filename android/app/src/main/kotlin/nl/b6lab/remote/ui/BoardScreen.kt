@@ -219,7 +219,7 @@ private fun PedalRow(
                     onTap = { c.tapPedal(p.slot) },
                     onToggle = { c.togglePedal(p.slot) },
                     onLongPress = { onLong(p.slot) },
-                    onMoveTo = { target -> c.move(p.slot, ui.pedals[target].slot) },
+                    onMoveTo = { target -> c.movePedal(p.slot, target) },
                     wholeDrag = landscape,
                     modifier = Modifier.width(cell).fillMaxSize(),
                 )

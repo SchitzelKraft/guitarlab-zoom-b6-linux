@@ -82,12 +82,30 @@ def _edits(data):
     return out
 
 
+# Chain edits on a patch with double-width effects (SVT Drive, tails [F,T,F,T,F]): (op, args)
+WIDE_EDITS = [("move_entry", (0, 2)), ("move_entry", (0, 3)), ("move_entry", (2, 0)), ("move_entry", (4, 0)),
+              ("move_entry", (4, 2)), ("move_entry", (1, 0)), ("delete_entry", (0,)), ("delete_entry", (2,)),
+              ("delete_entry", (4,)), ("delete_entry", (1,))]
+
+
+def _wide_edits(data):
+    """Each WIDE_EDITS edit applied to a fresh parse, encoded (null when Python refuses it)."""
+    out = []
+    for name, args in WIDE_EDITS:
+        p = ptcf.parse(data)
+        ok = getattr(ptcf, name)(p, *args)
+        out.append({"op": name, "args": list(args), "encoded": None if ok is False else ptcf.encode(p).hex()})
+    return out
+
+
 def ptcf_record(slot, file, image):
     p = ptcf.parse(image)
     rec = {"slot": slot, "file": file, "raw": image.hex(), **_model(p),
            "encoded": ptcf.encode(p).hex()}
     if slot in EDIT_SLOTS:
         rec["edits"] = _edits(image)
+    if slot == -1:
+        rec["wide_edits"] = _wide_edits(image)
     return rec
 
 
