@@ -8,11 +8,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import nl.b6lab.remote.ui.B6Colors
+import nl.b6lab.remote.ui.B6Text
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
@@ -86,33 +98,39 @@ class MainActivity : ComponentActivity() {
                     }
                     return@B6Theme
                 }
+                val s = state
+                val connection = s?.connection ?: Connection.DISCONNECTED
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(B6Colors.Gunmetal)
                         .safeDrawingPadding()
-                        .padding(16.dp)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    val s = state
-                    Text("B6 Remote" + if (isDemo) " (demo)" else "", color = color)
-                    val connection = s?.connection ?: Connection.DISCONNECTED
+                    Text("B6 Remote" + if (isDemo) " (demo)" else "", style = B6Text.Title, fontSize = 48.sp, color = color)
+                    Spacer(Modifier.height(12.dp))
                     Text(
-                        when (connection) {
-                            Connection.CONNECTED -> "Connected"
-                            Connection.CONNECTING -> "Connecting..."
-                            Connection.DISCONNECTED -> "B6 not connected"
-                        },
-                        color = color,
+                        "Connect the B6 with a USB cable and switch it on.",
+                        style = B6Text.Label, fontSize = 20.sp, color = B6Colors.SilkscreenDim, textAlign = TextAlign.Center,
                     )
-                    if (s != null) {
-                        Text("Slot: ${s.slot ?: "-"}", color = color)
-                        Text("Patch: ${s.edit?.name ?: "-"}", color = color)
-                        Text("PC mode: ${s.pcMode}", color = color)
-                        Text("Auto save: ${s.autoSave}", color = color)
-                        s.error?.let { Text("Error: $it", color = color) }
+                    if (connection == Connection.CONNECTING || reconnecting) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Connecting to the B6...", style = B6Text.Label, fontSize = 20.sp, color = color)
+                    }
+                    s?.error?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, style = B6Text.Label, fontSize = 18.sp, color = B6Colors.LedRed, textAlign = TextAlign.Center)
                     }
                     if (connection == Connection.DISCONNECTED && !isDemo && demo != null) {
-                        Button(onClick = { pedal.startDemo(demo) }) { Text("Demo") }
+                        Spacer(Modifier.height(24.dp))
+                        Box(
+                            Modifier.height(56.dp).clip(RoundedCornerShape(28.dp))
+                                .border(1.5.dp, B6Colors.Silkscreen, RoundedCornerShape(28.dp))
+                                .clickable { pedal.startDemo(demo) }.padding(horizontal = 28.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("Try demo", style = B6Text.Button, fontSize = 18.sp) }
                     }
                 }
             }

@@ -2,6 +2,7 @@ package nl.b6lab.remote.ui
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -25,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,7 +50,7 @@ import nl.b6lab.remote.core.KnobView
 import nl.b6lab.remote.core.RemoteController
 import kotlin.math.roundToInt
 
-private const val PLACES = 6
+internal const val PLACES = 6
 
 /**
  * The board. [onAddEffect] gets the entry index of the new place, [onLongPressPedal] the entry index (both open the
@@ -70,61 +73,82 @@ fun BoardScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(B6Colors.Background)
+            .background(B6Colors.Gunmetal)
             .safeDrawingPadding()
             .padding(horizontal = 12.dp),
     ) {
         Header(ui, controller, landscape)
         Banners(ui, onReconnect)
-        val pedals: @Composable (Modifier) -> Unit = { m ->
-            PedalRow(ui, controller, loader, landscape, onAddEffect, onLongPressPedal, m)
-        }
-        val dials: @Composable (Modifier) -> Unit = { m ->
-            Dials(ui, controller, landscape, { fine = it }, m)
-        }
         if (landscape) {
-            pedals(Modifier.fillMaxWidth().height(116.dp))
+            PedalGrid(ui, controller, loader, 6, 116.dp, onAddEffect, onLongPressPedal, Modifier.fillMaxWidth())
             Spacer(Modifier.height(4.dp))
-            dials(Modifier.fillMaxWidth().weight(1f))
+            Dials(ui, controller, true, { fine = it }, Modifier.fillMaxWidth().weight(1f))
         } else {
-            pedals(Modifier.fillMaxWidth().height(140.dp))
-            Spacer(Modifier.height(12.dp))
-            dials(Modifier.fillMaxWidth().weight(1f))
+            // the places and the knobs of the selected pedal; the page scrolls only when the knobs do not fit
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
+                Spacer(Modifier.height(8.dp))
+                PedalGrid(ui, controller, loader, 3, 120.dp, onAddEffect, onLongPressPedal, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                Dials(ui, controller, false, { fine = it }, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+            }
         }
     }
     if (fineKnob != null) FineSheet(fineKnob, controller) { fine = null }
 }
 
 @Composable
+private fun BankLabel(ui: BoardUi, size: androidx.compose.ui.unit.TextUnit) {
+    val letter = ui.bankLetter
+    val bank = if (letter.isNotEmpty()) ui.header.removeSuffix(letter).trimEnd() else ui.header
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(bank, style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = size, maxLines = 1, softWrap = false)
+        if (letter.isNotEmpty()) {
+            Spacer(Modifier.width(5.dp))
+            Text(letter, style = B6Text.Title, color = B6Colors.Amber, fontSize = size, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
 private fun Header(ui: BoardUi, c: RemoteController, landscape: Boolean) {
-    val controls: @Composable () -> Unit = {
+    val nav: @Composable () -> Unit = {
         NavButton("◀") { c.previousPatch() }
         NavButton("▶") { c.nextPatch() }
-        Spacer(Modifier.width(8.dp))
+    }
+    val status: @Composable () -> Unit = {
         Box(
             Modifier.size(12.dp).clip(CircleShape)
-                .background(if (ui.connected) B6Colors.Ok else B6Colors.Error),
+                .background(if (ui.connected) B6Colors.Amber else B6Colors.SilkscreenDim),
         )
         Spacer(Modifier.width(8.dp))
         SaveButton(ui.canSave) { c.save() }
     }
     if (landscape) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(ui.header, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1, softWrap = false)
-                Text(ui.name, color = B6Colors.Text, fontSize = 24.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            controls()
+            BankLabel(ui, 18.sp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                ui.name, style = B6Text.Title, fontSize = 26.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            nav()
+            Spacer(Modifier.width(8.dp))
+            status()
         }
     } else {
-        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            Text(ui.header, color = B6Colors.TextDim, fontSize = 14.sp, maxLines = 1, softWrap = false)
-            Text(
-                ui.name, color = B6Colors.Text, fontSize = 36.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { BankLabel(ui, 20.sp) }
+                nav()
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                controls()
+                Text(
+                    ui.name, style = B6Text.Title, fontSize = 40.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                status()
             }
         }
     }
@@ -139,11 +163,14 @@ private fun SaveButton(enabled: Boolean, onClick: () -> Unit) {
     ) {
         Box(
             Modifier.height(32.dp).clip(RoundedCornerShape(16.dp))
-                .background(if (enabled) B6Colors.Accent else B6Colors.Surface)
+                .background(if (enabled) B6Colors.Amber else B6Colors.Panel)
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text("Save", fontSize = 14.sp, color = if (enabled) B6Colors.Background else B6Colors.TextDim)
+            Text(
+                "Save", style = B6Text.Button, fontSize = 16.sp,
+                color = if (enabled) B6Colors.Gunmetal else B6Colors.SilkscreenDim,
+            )
         }
     }
 }
@@ -153,14 +180,14 @@ private fun NavButton(label: String, onClick: () -> Unit) {
     Box(
         Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = B6Colors.Text, fontSize = 22.sp) }
+    ) { Text(label, style = B6Text.Label, fontSize = 22.sp) }
 }
 
 @Composable
 private fun Banners(ui: BoardUi, onReconnect: (() -> Unit)?) {
-    if (!ui.connected) Banner("B6 not connected", B6Colors.Error, "Reconnect".takeIf { onReconnect != null }, onReconnect)
-    if (ui.autoSaveWarning) Banner("AUTO SAVE is on: the pedal stores every change", B6Colors.Warn)
-    ui.error?.let { Banner(it, B6Colors.Error) }
+    if (!ui.connected) Banner("B6 not connected", B6Colors.Silkscreen, "Reconnect".takeIf { onReconnect != null }, onReconnect)
+    if (ui.autoSaveWarning) Banner("Auto save is on: the pedal stores every change", B6Colors.Silkscreen)
+    ui.error?.let { Banner(it, B6Colors.LedRed) }
 }
 
 @Composable
@@ -175,71 +202,63 @@ private fun Banner(
             .fillMaxWidth()
             .padding(bottom = 6.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.15f))
+            .background(B6Colors.Panel)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, color = color, fontSize = 14.sp, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+        Text(text, style = B6Text.Label, color = color, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
         if (action != null && onAction != null) {
             Box(
                 Modifier.height(48.dp).clickable(onClick = onAction).padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text(action, color = B6Colors.Text, fontSize = 14.sp) }
+            ) { Text(action, style = B6Text.Button, color = B6Colors.Amber, fontSize = 16.sp) }
         }
     }
 }
 
+/**
+ * The six places in chain order, [cols] per row: the pedals, then a "+" per free place, then quiet empty cells.
+ * Cells are placed absolutely so a dragged pedal can cross rows; a drop maps the cell under the finger to the
+ * position among the shown pedals ([RemoteController.movePedal]).
+ */
 @Composable
-private fun PedalRow(
+private fun PedalGrid(
     ui: BoardUi,
     c: RemoteController,
     loader: coil.ImageLoader,
-    landscape: Boolean,
+    cols: Int,
+    cellHeight: Dp,
     onAdd: (Int) -> Unit,
     onLong: (Int) -> Unit,
     modifier: Modifier,
 ) {
     val gap = 8.dp
     val density = LocalDensity.current
+    val rows = (PLACES + cols - 1) / cols
     val used = ui.pedals.size
     val plus = ui.freePlaces.coerceAtMost((PLACES - used).coerceAtLeast(0))
     val nextEntry = (ui.pedals.maxOfOrNull { it.slot } ?: -1) + 1
-    BoxWithConstraints(modifier) {
-        val cell: Dp = if (landscape) (maxWidth - gap * (PLACES - 1)) / PLACES else 96.dp
-        val pitch = with(density) { (cell + gap).toPx() }
-        val scroll = rememberScrollState()
-        val viewport = with(density) { maxWidth.toPx() }
-        val selIndex = ui.pedals.indexOfFirst { it.selected }
-        // the selected pedal is scrolled into view (a new patch selects its first pedal: back to the start)
-        LaunchedEffect(selIndex, used, ui.header, pitch, viewport, scroll.maxValue) {
-            if (landscape || selIndex < 0) return@LaunchedEffect
-            val left = selIndex * pitch
-            val right = left + pitch - with(density) { gap.toPx() }
-            val target = when {
-                left < scroll.value -> left
-                right > scroll.value + viewport -> right - viewport
-                else -> return@LaunchedEffect
-            }
-            scroll.animateScrollTo(target.roundToInt().coerceAtLeast(0))
-        }
-        val rowMod = if (landscape) Modifier.fillMaxSize() else Modifier.fillMaxSize().horizontalScroll(scroll)
-        Row(rowMod, horizontalArrangement = Arrangement.spacedBy(gap)) {
-            ui.pedals.forEachIndexed { i, p ->
-              key(p.slot) {
+    BoxWithConstraints(modifier.height(cellHeight * rows + gap * (rows - 1))) {
+        val cellW = (maxWidth - gap * (cols - 1)) / cols
+        val pitchX = with(density) { (cellW + gap).toPx() }
+        val pitchY = with(density) { (cellHeight + gap).toPx() }
+        fun place(i: Int) = Modifier
+            .offset(x = (cellW + gap) * (i % cols), y = (cellHeight + gap) * (i / cols))
+            .size(cellW, cellHeight)
+        ui.pedals.forEachIndexed { i, p ->
+            key(p.slot) {
                 Pedal(
-                    view = p, index = i, count = used, pitchPx = pitch, loader = loader,
+                    view = p, index = i, count = used, cols = cols, pitchX = pitchX, pitchY = pitchY, loader = loader,
                     onTap = { c.tapPedal(p.slot) },
                     onToggle = { c.togglePedal(p.slot) },
                     onLongPress = { onLong(p.slot) },
                     onMoveTo = { target -> c.movePedal(p.slot, target) },
-                    wholeDrag = landscape,
-                    modifier = Modifier.width(cell).fillMaxSize(),
+                    modifier = place(i),
                 )
-              }
             }
-            repeat(plus) {
-                EmptyPlace({ onAdd(nextEntry) }, Modifier.width(cell).fillMaxSize())
-            }
+        }
+        for (i in used until PLACES) {
+            EmptyPlace(if (i - used < plus) ({ onAdd(nextEntry) }) else null, place(i))
         }
     }
 }
@@ -247,7 +266,7 @@ private fun PedalRow(
 @Composable
 private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: (Int) -> Unit, modifier: Modifier) {
     if (landscape) {
-        // one row, the whole width: the blue outline on the board shows which effect these are
+        // one row, the whole width: the amber outline on the board shows which effect these are
         BoxWithConstraints(modifier) {
             val n = ui.knobs.size.coerceAtLeast(1)
             val size = minOf(112.dp, maxWidth / n - 4.dp, maxHeight - 24.dp).coerceAtLeast(48.dp)
@@ -256,13 +275,11 @@ private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: 
             }
         }
     } else {
-        Column(modifier) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ui.knobs.chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth()) {
-                        row.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 84.dp) }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ui.knobs.chunked(3).forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 88.dp) }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -281,18 +298,18 @@ private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit
         stepped = v
         c.dragKnob(knob.index, v)
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = B6Colors.Surface) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = B6Colors.Panel) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(knob.name, color = B6Colors.TextDim, fontSize = 16.sp)
+            Text(knob.name, style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = 20.sp)
             Text(
                 local?.takeIf { it != knob.value }?.toString() ?: knob.text,
-                color = B6Colors.Text, fontSize = 40.sp,
+                style = B6Text.Value, fontSize = 56.sp,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StepButton("-") { step(-1) }
+                StepButton("−") { step(-1) }
                 Slider(
                     value = (local ?: knob.value).toFloat(),
                     onValueChange = {
@@ -303,6 +320,11 @@ private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit
                     },
                     onValueChangeFinished = { local = null },
                     valueRange = 0f..knob.max.toFloat().coerceAtLeast(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = B6Colors.Amber,
+                        activeTrackColor = B6Colors.Amber,
+                        inactiveTrackColor = B6Colors.SilkscreenDim.copy(alpha = 0.3f),
+                    ),
                     modifier = Modifier.weight(1f).height(56.dp),
                 )
                 StepButton("+") { step(1) }
@@ -314,7 +336,8 @@ private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit
 @Composable
 private fun StepButton(label: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(B6Colors.SurfaceHigh).clickable(onClick = onClick),
+        Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+            .border(1.5.dp, B6Colors.Silkscreen, RoundedCornerShape(12.dp)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = B6Colors.Text, fontSize = 28.sp) }
+    ) { Text(label, style = B6Text.Button, fontSize = 30.sp) }
 }

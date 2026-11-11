@@ -248,10 +248,12 @@ class ControllerTest {
     @Test
     fun headerFormat() = runTest {
         val r = rig()
-        assertEquals("BANK 01 · A", r.c.ui.value.header)
+        assertEquals("Bank 1 A", r.c.ui.value.header)
+        assertEquals("A", r.c.ui.value.bankLetter)
         r.p.footswitchTo(239)
         settle()
-        assertEquals("BANK 60 · D", r.c.ui.value.header)
+        assertEquals("Bank 60 D", r.c.ui.value.header)
+        assertEquals("D", r.c.ui.value.bankLetter)
     }
 
     @Test

@@ -15,7 +15,7 @@ data class PedalView(val slot: Int, val fx: EffectInfo?, val on: Boolean, val se
 data class KnobView(val index: Int, val name: String, val value: Int, val max: Int, val text: String)
 
 data class BoardUi(
-    /** "BANK 01 · B", empty while no patch is known. */
+    /** "Bank 1 B" (bank number without leading zero, then the letter), empty while no patch is known. */
     val header: String,
     val name: String,
     val connected: Boolean,
@@ -27,6 +27,8 @@ data class BoardUi(
     val canSave: Boolean,
     val autoSaveWarning: Boolean,
     val error: String?,
+    /** The letter of the header ("B"), shown in the accent colour; empty while no patch is known. */
+    val bankLetter: String = "",
 )
 
 /**
@@ -229,7 +231,7 @@ class RemoteController(
         }
         val free = freeCached
         return BoardUi(
-            header = s.slot?.let { "BANK %02d · %c".format(Locale.ROOT, it / 4 + 1, LETTERS[it % 4]) } ?: "",
+            header = s.slot?.let { "Bank %d %c".format(Locale.ROOT, it / 4 + 1, LETTERS[it % 4]) } ?: "",
             name = edit?.name ?: "",
             connected = connected,
             pedals = pedals,
@@ -238,6 +240,7 @@ class RemoteController(
             canSave = connected && s.dirty && edit != null,
             autoSaveWarning = connected && s.autoSave,
             error = s.error,
+            bankLetter = s.slot?.let { LETTERS[it % 4].toString() } ?: "",
         )
     }
 

@@ -5,7 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -47,7 +47,11 @@ import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 import nl.b6lab.remote.core.EffectInfo
 import nl.b6lab.remote.core.PedalView
-import kotlin.math.roundToInt
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.floor
 
 @Composable
 fun rememberSvgLoader(): ImageLoader {
@@ -70,16 +74,17 @@ fun EffectPicture(fx: EffectInfo?, loader: ImageLoader, grey: Boolean, modifier:
             modifier = modifier,
         )
     } else {
-        Box(modifier.background(B6Colors.SurfaceHigh), Alignment.Center) {
-            Text(fx?.name ?: "?", color = B6Colors.Text, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Box(modifier.background(B6Colors.Panel), Alignment.Center) {
+            Text(fx?.name ?: "?", style = B6Text.Label, fontSize = 14.sp, textAlign = TextAlign.Center)
         }
     }
 }
 
 /**
- * One pedal. Tap selects, the footswitch strip at the bottom switches it on or off, long press asks for the chooser. Moving uses the grip strip on top (a
- * horizontal drag there): the rest of the pedal stays free so a scrolling row can still be scrolled by it.
- * [pitchPx] is the distance between two neighbouring pedals, [index] the position in the row and [count] the row length.
+ * One pedal in a grid of [cols] columns (cells [pitchX] by [pitchY] px apart). Tap selects, the footswitch band at the
+ * bottom switches it on or off (and does nothing else), long press asks for the chooser, and dragging the body (after
+ * the touch slop) moves it: the cell under the finger on release, in screen order, goes to [onMoveTo].
+ * [index] is the position among the shown pedals and [count] their number.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -87,106 +92,93 @@ fun Pedal(
     view: PedalView,
     index: Int,
     count: Int,
-    pitchPx: Float,
+    cols: Int,
+    pitchX: Float,
+    pitchY: Float,
     loader: ImageLoader,
     onTap: () -> Unit,
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
     onMoveTo: (Int) -> Unit,
-    wholeDrag: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val moveTo by rememberUpdatedState(onMoveTo)
     var dx by remember { mutableFloatStateOf(0f) }
+    var dy by remember { mutableFloatStateOf(0f) }
     val shape = RoundedCornerShape(12.dp)
-    val border = if (view.selected) BorderStroke(3.dp, B6Colors.Accent) else BorderStroke(1.dp, B6Colors.SurfaceHigh)
+    val moving = dx != 0f || dy != 0f
     Box(
         modifier
-            .zIndex(if (dx != 0f) 1f else 0f)
-            .graphicsLayer { translationX = dx }
+            .zIndex(if (moving) 1f else 0f)
+            .graphicsLayer { translationX = dx; translationY = dy }
             .clip(shape)
-            .background(B6Colors.Surface)
+            .background(B6Colors.Panel)
     ) {
-        val fx = view.fx
-        val moveDrag = Modifier.pointerInput(index, count, pitchPx) {
-            detectHorizontalDragGestures(
+        val rows = (PLACES + cols - 1) / cols
+        val moveDrag = Modifier.pointerInput(index, count, cols, pitchX, pitchY) {
+            detectDragGestures(
                 onDragEnd = {
-                    val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
-                    dx = 0f
+                    val cx = ((index % cols) + 0.5f) * pitchX + dx
+                    val cy = ((index / cols) + 0.5f) * pitchY + dy
+                    val col = floor(cx / pitchX).toInt().coerceIn(0, cols - 1)
+                    val row = floor(cy / pitchY).toInt().coerceIn(0, rows - 1)
+                    val target = (row * cols + col).coerceIn(0, count - 1)
+                    dx = 0f; dy = 0f
                     if (target != index) moveTo(target)
                 },
-                onDragCancel = { dx = 0f },
-                onHorizontalDrag = { change, d -> change.consume(); dx += d },
+                onDragCancel = { dx = 0f; dy = 0f },
+                onDrag = { change, d -> change.consume(); dx += d.x; dy += d.y },
             )
         }
         // the body (select, long press for the chooser, move) fills the pedal; the footswitch band overlays its bottom
-        Box(
-            Modifier.fillMaxSize()
-                .then(if (wholeDrag) moveDrag else Modifier) // landscape: the whole body moves the pedal
-                .combinedClickable(onClick = onTap, onLongClick = onLongPress),
-        ) {
+        Box(Modifier.fillMaxSize().then(moveDrag).combinedClickable(onClick = onTap, onLongClick = onLongPress)) {
             Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
-                EffectPicture(
-                    fx, loader, !view.on,
-                    Modifier.fillMaxSize().padding(top = if (wholeDrag) 4.dp else 20.dp, bottom = 4.dp, start = 4.dp, end = 4.dp),
-                )
-            }
-            // portrait: the grip strip (48 dp touch area) moves the pedal
-            if (!wholeDrag) Box(
-                Modifier.fillMaxWidth().height(48.dp).then(moveDrag),
-                contentAlignment = Alignment.TopCenter,
-            ) {
-                Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
+                EffectPicture(view.fx, loader, !view.on, Modifier.fillMaxSize().padding(4.dp))
             }
         }
-        // footswitch: 48 dp touch area, only the bottom 30 dp is drawn so little of the picture is covered
-        Box(
+        // footswitch: the band is the whole 48 dp touch area
+        Row(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(48.dp)
+                .background(B6Colors.Panel.copy(alpha = 0.85f))
                 .combinedClickable(onClick = onToggle, onLongClick = {}),
-            contentAlignment = Alignment.BottomCenter,
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.fillMaxWidth().height(30.dp).background(Color.Black.copy(alpha = 0.6f)),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(10.dp).clip(CircleShape)
-                        .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    if (view.on) "ON" else "OFF",
-                    color = if (view.on) B6Colors.Text else B6Colors.TextDim, fontSize = 12.sp,
-                )
-            }
+            Box(Modifier.size(10.dp).clip(CircleShape).background(if (view.on) B6Colors.LedRed else B6Colors.LedOff))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (view.on) "On" else "Off",
+                style = B6Text.Button, fontSize = 14.sp,
+                color = if (view.on) B6Colors.Silkscreen else B6Colors.SilkscreenDim,
+            )
         }
-        Box(Modifier.fillMaxSize().drawBehind {
-            val w = border.width.toPx()
+        // the selected pedal: amber outline, 3 dp, drawn inside
+        if (view.selected) Box(Modifier.fillMaxSize().drawBehind {
+            val w = 3.dp.toPx()
             drawRoundRect(
-                if (view.selected) B6Colors.Accent else B6Colors.SurfaceHigh,
-                topLeft = androidx.compose.ui.geometry.Offset(w / 2, w / 2),
-                size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx() - w / 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(w),
+                B6Colors.Amber,
+                topLeft = Offset(w / 2, w / 2),
+                size = Size(size.width - w, size.height - w),
+                cornerRadius = CornerRadius(12.dp.toPx() - w / 2),
+                style = Stroke(w),
             )
         })
     }
 }
 
-/** An empty place: "+" opens the chooser. */
+/** An empty place: with [onClick] a "+" that opens the chooser, otherwise a quiet cell. */
 @Composable
-fun EmptyPlace(onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun EmptyPlace(onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
     Box(
         modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(B6Colors.Surface.copy(alpha = 0.5f))
-            .clickable(onClick = onClick),
+            .background(B6Colors.Panel.copy(alpha = 0.4f))
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it },
         contentAlignment = Alignment.Center,
     ) {
-        Text("+", color = B6Colors.TextDim, fontSize = 32.sp)
+        if (onClick != null) Text("+", style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = 36.sp)
     }
 }

@@ -77,24 +77,28 @@ fun Dial(
         val frac = if (knob.max > 0) shown.toFloat() / knob.max else 0f
         Box(Modifier.size(size), contentAlignment = Alignment.Center) {
             Canvas(Modifier.size(size)) {
-                val w = 6.dp.toPx()
+                val w = 5.dp.toPx()
+                val track = 3.dp.toPx()
                 val inset = w / 2
                 val arc = Size(this.size.width - w, this.size.height - w)
                 drawArc(
-                    B6Colors.SurfaceHigh, 135f, 270f, false, Offset(inset, inset), arc,
-                    style = Stroke(w, cap = StrokeCap.Round),
+                    B6Colors.SilkscreenDim, 135f, 270f, false, Offset(inset, inset), arc,
+                    style = Stroke(track, cap = StrokeCap.Round),
                 )
                 if (frac > 0f) {
                     drawArc(
-                        B6Colors.Accent, 135f, 270f * frac, false, Offset(inset, inset), arc,
+                        B6Colors.Amber, 135f, 270f * frac, false, Offset(inset, inset), arc,
                         style = Stroke(w, cap = StrokeCap.Round),
                     )
                 }
             }
-            Text(if (shown != knob.value) shown.toString() else knob.text, color = B6Colors.Text, fontSize = 18.sp, maxLines = 1, textAlign = TextAlign.Center)
+            Text(
+                if (shown != knob.value) shown.toString() else knob.text,
+                style = B6Text.Value, fontSize = 22.sp, maxLines = 1, textAlign = TextAlign.Center,
+            )
         }
         Text(
-            knob.name, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1,
+            knob.name, style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = 15.sp, maxLines = 1,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
         )
     }
