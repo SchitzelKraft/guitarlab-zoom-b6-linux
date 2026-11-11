@@ -82,9 +82,9 @@ fun BoardScreen(
             Dials(ui, controller, landscape, { fine = it }, m)
         }
         if (landscape) {
-            pedals(Modifier.fillMaxWidth().weight(1f))
-            Spacer(Modifier.height(8.dp))
-            dials(Modifier.fillMaxWidth().height(108.dp))
+            pedals(Modifier.fillMaxWidth().height(116.dp))
+            Spacer(Modifier.height(4.dp))
+            dials(Modifier.fillMaxWidth().weight(1f))
         } else {
             pedals(Modifier.fillMaxWidth().height(200.dp))
             Spacer(Modifier.height(12.dp))
@@ -235,20 +235,14 @@ private fun PedalRow(
 @Composable
 private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: (Int) -> Unit, modifier: Modifier) {
     val selected = ui.pedals.firstOrNull { it.selected }
-    val label: @Composable () -> Unit = {
-        if (selected != null) {
-            Text(selected.fx?.name ?: "", color = B6Colors.Text, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                if (selected.on) "ON" else "OFF",
-                color = if (selected.on) B6Colors.Led else B6Colors.TextDim, fontSize = 14.sp,
-            )
-        }
-    }
     if (landscape) {
-        // one row: the selected effect's name and state at the left, then the dials
-        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(110.dp).padding(end = 8.dp)) { label() }
-            ui.knobs.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 80.dp) }
+        // one row, the whole width: the blue outline on the board shows which effect these are
+        BoxWithConstraints(modifier) {
+            val n = ui.knobs.size.coerceAtLeast(1)
+            val size = minOf(112.dp, maxWidth / n - 4.dp, maxHeight - 24.dp).coerceAtLeast(48.dp)
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                ui.knobs.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = size) }
+            }
         }
     } else {
         Column(modifier) {

@@ -29,6 +29,12 @@ data class ParamInfo(
         val result = BigDecimal(min).add(BigDecimal(step).multiply(BigDecimal(value)))
         return result.setScale(precision, RoundingMode.HALF_EVEN).toPlainString()
     }
+
+    /** What the app shows: like [format], but the plain number when the parameter has no display info. */
+    fun display(value: Int): String {
+        labels?.let { if (value in it.indices) return it[value] }
+        return if (displayMin == null || displayStep == null) value.toString() else format(value)
+    }
 }
 
 data class EffectInfo(

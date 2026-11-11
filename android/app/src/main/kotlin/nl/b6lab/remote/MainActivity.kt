@@ -57,8 +57,8 @@ class MainActivity : ComponentActivity() {
             val state by pedal.state.collectAsStateWithLifecycle()
             val isDemo by pedal.isDemo.collectAsStateWithLifecycle()
             val controller by pedal.controller.collectAsStateWithLifecycle()
-            val color = MaterialTheme.colorScheme.onBackground
             B6Theme {
+                val color = MaterialTheme.colorScheme.onBackground
                 val c = controller
                 if (c != null) {
                     val ui by c.ui.collectAsStateWithLifecycle()

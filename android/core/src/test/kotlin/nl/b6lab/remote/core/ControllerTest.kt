@@ -356,3 +356,12 @@ class ControllerTest {
         assertTrue(r.c.ui.value.pedals[0].selected)
     }
 }
+
+class ParamDisplayTest {
+    @Test
+    fun plainNumberWithoutDisplayInfo() {
+        assertEquals("raw 4", ParamInfo("x", 10, null, null, 0, null).format(4))
+        assertEquals("4", ParamInfo("x", 10, null, null, 0, null).display(4))
+        assertEquals("3.0", ParamInfo("x", 10, "1", "0.5", 1, null).display(4))
+    }
+}

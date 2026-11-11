@@ -225,7 +225,7 @@ class RemoteController(
         return info.params.mapIndexedNotNull { i, p ->
             if (!e.editable(i) || i >= e.params.size) return@mapIndexedNotNull null
             val v = e.params[i]
-            KnobView(i, p.name, v, p.rawMax ?: e.maxValue(i), p.format(v))
+            KnobView(i, p.name, v, p.rawMax ?: e.maxValue(i), p.display(v))
         }
     }
 }
