@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,7 +75,7 @@ fun ChooserScreen(
     val groups = remember(catalog) { catalog.byGroup() }
     val currentFx = replaceSlot?.let { slot -> ui.pedals.firstOrNull { it.slot == slot }?.fx }
     // opens on the group of the effect being changed, else the first group
-    var tab by rememberSaveable { mutableIntStateOf(groups.indexOfFirst { it.first == currentFx?.group }.coerceAtLeast(0)) }
+    var tab by rememberSaveable(replaceSlot, expected.slot) { mutableIntStateOf(catalog.groupIndexOf(currentFx?.fxId)) }
     val tabIndex = tab.coerceIn(0, (groups.size - 1).coerceAtLeast(0))
     val current = groups.getOrNull(tabIndex)?.second.orEmpty()
     // ui is read so that the greying follows a patch change while the chooser is open
@@ -83,30 +84,46 @@ fun ChooserScreen(
     val removeLabel = "Remove ${currentFx?.name ?: "effect"}"
     val remove = { controller.remove(replaceSlot!!, expected); onClose() }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(B6Colors.Gunmetal)
-            // consume touches on empty areas so nothing behind (the board) receives them
-            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }
-            .safeDrawingPadding()
-            .padding(horizontal = 12.dp),
-    ) {
+    Box(modifier.fillMaxSize().background(B6Colors.Gunmetal)) {
+        // blocks touches to the board: a sibling behind the content, so it only gets what the content leaves alone
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } })
+        ChooserContent(landscape, groups, tabIndex, { tab = it }, title, removeLabel, replaceSlot != null, remove, onClose, current, fitting, currentFx?.fxId, loader) { fx ->
+            controller.choose(fx.fxId, replaceSlot, expected); onClose()
+        }
+    }
+}
+
+@Composable
+private fun ChooserContent(
+    landscape: Boolean,
+    groups: List<Pair<String, List<nl.b6lab.remote.core.EffectInfo>>>,
+    tabIndex: Int,
+    onTab: (Int) -> Unit,
+    title: String,
+    removeLabel: String,
+    canRemove: Boolean,
+    remove: () -> Unit,
+    onClose: () -> Unit,
+    current: List<nl.b6lab.remote.core.EffectInfo>,
+    fitting: List<Boolean>,
+    currentFxId: Int?,
+    loader: coil.ImageLoader,
+    onPick: (nl.b6lab.remote.core.EffectInfo) -> Unit,
+) {
+    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 12.dp)) {
         if (landscape) {
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.width(120.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                    groups.forEachIndexed { i, (name, _) -> GroupTab(sentenceCase(name), i == tabIndex, true) { tab = i } }
+                    groups.forEachIndexed { i, (name, _) -> GroupTab(sentenceCase(name), i == tabIndex, true) { onTab(i) } }
                 }
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                         CloseButton(onClose)
                         Text(title, style = B6Text.Title, fontSize = 24.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        if (replaceSlot != null) RemoveButton(removeLabel, remove)
+                        if (canRemove) RemoveButton(removeLabel, remove)
                     }
-                    EffectGrid(GridCells.Adaptive(96.dp), 88, current, fitting, currentFx?.fxId, loader) { fx ->
-                        controller.choose(fx.fxId, replaceSlot, expected); onClose()
-                    }
+                    EffectGrid(GridCells.Adaptive(96.dp), 88, current, fitting, currentFxId, loader, onPick)
                 }
             }
         } else {
@@ -116,14 +133,12 @@ fun ChooserScreen(
                     CloseButton(onClose)
                 }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    groups.forEachIndexed { i, (name, _) -> GroupTab(sentenceCase(name), i == tabIndex, false) { tab = i } }
+                    groups.forEachIndexed { i, (name, _) -> GroupTab(sentenceCase(name), i == tabIndex, false) { onTab(i) } }
                 }
                 Box(Modifier.weight(1f)) {
-                    EffectGrid(GridCells.Fixed(3), 96, current, fitting, currentFx?.fxId, loader) { fx ->
-                        controller.choose(fx.fxId, replaceSlot, expected); onClose()
-                    }
+                    EffectGrid(GridCells.Fixed(3), 96, current, fitting, currentFxId, loader, onPick)
                 }
-                if (replaceSlot != null) Row(Modifier.fillMaxWidth()) { RemoveButton(removeLabel, remove) }
+                if (canRemove) Row(Modifier.fillMaxWidth()) { RemoveButton(removeLabel, remove) }
             }
         }
     }

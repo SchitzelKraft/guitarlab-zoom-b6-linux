@@ -55,6 +55,10 @@ class Catalog(val effects: Map<Int, EffectInfo>) {
             byName.filterKeys { it !in GROUP_ORDER }.map { (g, l) -> g to l.sortedBy { it.fxId } }
     }
 
+    /** Index in [byGroup] of the group holding [fxId]; 0 when it is null or unknown. */
+    fun groupIndexOf(fxId: Int?): Int =
+        if (fxId == null) 0 else byGroup().indexOfFirst { (_, l) -> l.any { it.fxId == fxId } }.coerceAtLeast(0)
+
     private fun load(fxId: Int) = effects[fxId]?.dspLoad ?: 0.0
 
     /**
