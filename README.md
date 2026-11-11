@@ -3,7 +3,37 @@
 B6 Lab is a Linux desktop editor for the Zoom B6 multi-effects pedal. It talks to the pedal
 over USB MIDI (raw ALSA, no extra drivers) and lets you browse all 240 patch slots, switch the
 pedal to a slot, edit effect on/off and knobs, rename patches, import and export `.zptc`
-files, and save back to the pedal with an automatic backup.
+files, and save back to the pedal with an automatic backup. A companion Android app, B6 Remote, does live editing over USB from a phone (see below).
+
+## Android app: B6 Remote
+
+B6 Remote is an Android app that edits the active patch of a Zoom B6 live over a USB cable (OTG), for practice and on stage. It shows a pedal board with the effect pictures, on/off footswitches and knobs; you can add, change, remove and move effects and save the patch. It follows patch changes you make on the pedal, and works in portrait and landscape.
+
+![B6 Remote in portrait](docs/android/portrait.png)
+![B6 Remote in landscape](docs/android/landscape.png)
+![Choosing an effect](docs/android/chooser.png)
+
+### Download and install
+
+Download `B6Remote-1.0.apk` from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
+
+### Requirements
+
+- Android 10 or newer with USB OTG support (a USB-C to Micro-B cable, or a Micro-B cable with an adapter).
+- Zoom B6 with firmware 1.00.
+- No Bluetooth: the BTA-1 adapter is not supported.
+
+### First use
+
+Switch AUTO SAVE off on the B6 if you want your changes to stay temporary until you tap Save. Connect the B6 to the phone with the cable and switch the pedal on; the app connects by itself.
+
+The effect pictures and effect names shown by the app belong to Zoom Corporation. This project is not affiliated with Zoom.
+
+### Build it yourself
+
+1. Get the data files as described in [Data files](#data-files-not-in-this-repository) below.
+2. Run `android/prepare.sh` to copy them into the app.
+3. Install JDK 21 and the Android SDK, then run `cd android && ./gradlew :app:assembleDebug`.
 
 ## Install
 
