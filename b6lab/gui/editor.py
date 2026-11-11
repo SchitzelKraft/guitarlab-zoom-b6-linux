@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QInputDialog, QLineEdit, QScrollArea, QTableView,
                                QWidget, QLabel, QVBoxLayout)
 
 from b6lab import effects as fx_catalog, ptcf
-from b6lab.gui import glpicker, theme
+from b6lab.gui import glpicker, patch_search, theme
 from b6lab.gui.glpedal import Knob, Pedal
 from b6lab.gui.glui import (DOWNLOADS, LEFT, TOP, ImageButton, Painted, draw_fitted_text, font, image, rgb)
 from b6lab.gui.patch_list import PatchListModel, configure_patch_table, paint_table_header_title, slot_label
@@ -562,9 +562,14 @@ class EditorView(QWidget):
 
         self.model = PatchListModel(self)
         self.list = QTableView(self)
-        self.list.setModel(self.model)
+        self.search_box, self.proxy = patch_search.attach(self, self.list, self.model)
         configure_patch_table(self.list)
-        self.list.clicked.connect(lambda idx: self.open_slot(idx.row()))
+        self.list.clicked.connect(lambda idx: self.open_slot(self.proxy.slot_of_row(idx.row())))
+        self.search_box.returnPressed.connect(self._open_search_choice)
+        self.search_box.step.connect(self._search_step)
+        self.search_box.textChanged.connect(lambda _t: setattr(self, "_search_nav", False))
+        self._search_nav = False   # the user moved the selection with Up/Down since the last edit
+        self.proxy.refreshed.connect(self._reselect_open_slot)
         self.list.doubleClicked.connect(self._edit_comment_dialog)
         # the same PatchListComponent as on the PATCH page: rows drag into the Patch Pool, pool
         # patches / groups dropped on a row are imported (handled by the PATCH page)
@@ -671,7 +676,8 @@ class EditorView(QWidget):
         # lower part (StretchableLayoutManager): list | 4 px bar | clipboard 430 px
         top = 400
         lw = max(0, w - 434)
-        self.list.setGeometry(0, top, lw, max(0, h - top))
+        self.search_box.setGeometry(8, top + 5, max(0, lw - 16), patch_search.HEIGHT - 10)
+        self.list.setGeometry(0, top + patch_search.HEIGHT, lw, max(0, h - top - patch_search.HEIGHT))
         self.bar.setGeometry(lw, top, 4, max(0, h - top))
         self.clipboard.setGeometry(lw + 4, top, 430, max(0, h - top))
         self.expand_button.setGeometry(w - 32, top - 36, 18, 18)
@@ -799,7 +805,7 @@ class EditorView(QWidget):
 
     # state helpers
     def _edit_comment_dialog(self, index):
-        if index.column() != 2 or index.row() != self.slot or self.working is None:
+        if index.column() != 2 or self.proxy.slot_of_row(index.row()) != self.slot or self.working is None:
             return
         value, accepted = QInputDialog.getText(self, "Edit comment", "Comment:", text=self.comment_edit.text())
         if accepted:
@@ -834,12 +840,45 @@ class EditorView(QWidget):
         if self.slot is not None:
             self.model.set_modified(self.slot, self.modified())
 
+    def _select_slot(self, slot):
+        row = self.proxy.row_of_slot(slot) if slot is not None else -1
+        if row >= 0:
+            self.list.selectRow(row)
+        else:
+            self.list.clearSelection()
+
+    def _reselect_open_slot(self):
+        """A filter change hides / shows rows: keep the open patch highlighted."""
+        if self.slot is not None and not self.list.selectionModel().selectedRows():
+            self._select_slot(self.slot)
+
+    def _search_step(self, delta):
+        """Up / Down in the search field move the selection through the hits."""
+        n = self.proxy.rowCount()
+        if not self.proxy.filtering() or n == 0:
+            return
+        rows = self.list.selectionModel().selectedRows()
+        row = rows[0].row() + delta if rows and self._search_nav else (0 if delta > 0 else n - 1)
+        self.list.selectRow(max(0, min(n - 1, row)))
+        self._search_nav = True
+
+    def _open_search_choice(self):
+        """Enter in the search field: only while filtering. Opens the hit chosen with Up/Down,
+        else the first hit."""
+        if not self.proxy.filtering() or self.proxy.rowCount() == 0:
+            return
+        rows = self.list.selectionModel().selectedRows()
+        row = rows[0].row() if rows and self._search_nav else 0
+        slot = self.proxy.slot_of_row(row)
+        if slot >= 0:
+            self.open_slot(slot)
+
     # navigation
     def open_slot(self, slot):
         if slot == self.slot and self.working is not None:
             return
         if self._saving is not None:
-            self.list.selectRow(self._saving)
+            self._select_slot(self._saving)
             return
         if self.modified() and self.auto_save:
             # FUN_100119660 with AUTO SAVE on: no question and no save from the app; the edits
@@ -868,7 +907,7 @@ class EditorView(QWidget):
     def _start_open(self, slot, select=True):
         if not self.connected and self._offline is not None:
             self.slot = slot
-            self.list.selectRow(slot)
+            self._select_slot(slot)
             self.loaded = bytes(self._offline[slot])
             try:
                 self.working = ptcf.parse(self.loaded)
@@ -881,7 +920,7 @@ class EditorView(QWidget):
         if self.slot is not None:
             self.model.set_modified(self.slot, False)
         self.slot = slot
-        self.list.selectRow(slot)
+        self._select_slot(slot)
         # Show nothing until this slot's data arrives: the old patch must never be
         # editable (or savable) while self.slot already names the new slot.
         self._show_loading()
@@ -902,7 +941,9 @@ class EditorView(QWidget):
         self.working = working
         self._base = ptcf.encode(ptcf.parse(data))
         self._rebuild()
-        self.list.scrollTo(self.model.index(slot, 0), QTableView.ScrollHint.PositionAtTop)
+        index = self.proxy.index_of_slot(slot)
+        if index.isValid():
+            self.list.scrollTo(index, QTableView.ScrollHint.PositionAtTop)
 
     def _clear_boxes(self):
         for pedal in self.pedal_host.pedals:
@@ -1019,7 +1060,7 @@ class EditorView(QWidget):
                 import json
                 path = json.loads(bytes(event.mimeData().data(MIME_POOL)).decode())
                 pages.import_from_pool(node_at(pages.pool_store.tree, path),
-                                       self.list.rowAt(int(event.position().y())))
+                                       self.proxy.slot_of_row(self.list.rowAt(int(event.position().y()))))
             return True
         return super().eventFilter(obj, event)
 
@@ -1278,23 +1319,23 @@ class EditorView(QWidget):
         if not self.connected:
             self.window.show_error("not connected")
             self._pending_open = None
-            self.list.selectRow(self.slot)
+            self._select_slot(self.slot)
             return
         if self._invalid:
             self.window.show_error("; ".join(self._invalid.values()))
             self._pending_open = None
-            self.list.selectRow(self.slot)
+            self._select_slot(self.slot)
             return
         # Guitar Lab's SAVE asks where to save, starting at the current patch ("Save Changes").
         if dest is None:
             dest = self.ask_save_destination()
         if dest is None:
             self._pending_open = None
-            self.list.selectRow(self.slot)
+            self._select_slot(self.slot)
             return
         if not self.window.begin_save(self):
             self._pending_open = None
-            self.list.selectRow(self.slot)
+            self._select_slot(self.slot)
             return
         expected = self.loaded
         if dest != self.slot:
@@ -1327,7 +1368,7 @@ class EditorView(QWidget):
         if not res.ok:
             self._pending_action = None
             self.window.report_save_failed(res)
-            self.list.selectRow(self.slot)
+            self._select_slot(self.slot)
             self.window.editor_save_done(False)
             return
         self.window.report_saved(res)

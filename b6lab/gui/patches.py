@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QFileDialog,
 
 from b6lab import library, ptcf
 from b6lab.device import used_bytes
+from b6lab.gui import patch_search
 from b6lab.gui.gldialog import TextButton
 from b6lab.gui.glui import Painted, image, rgb, stretch_layout
 from b6lab.gui.patch_list import PatchListModel, configure_patch_table, paint_table_header_title, slot_label
@@ -29,7 +30,9 @@ class PatchesView(QWidget):
         w, h = self.width(), self.height()
         lw, bw, pw = stretch_layout(w, [(-0.5, -0.9, -0.75), (4, 4, 4), (256, 360, 256)])
         lh = max(0, h - 40)
-        self.list.setGeometry(0, 0, lw, lh)
+        sh = patch_search.HEIGHT
+        self.search_box.setGeometry(8, 5, max(0, lw - 16), sh - 10)
+        self.list.setGeometry(0, sh, lw, max(0, lh - sh))
         self.bar.setGeometry(lw, 0, bw, lh)
         self.pool.setGeometry(lw + bw, 0, pw, lh)
         self.backup_button.setGeometry(lw - 57, lh + 8, 114, 23)
@@ -90,7 +93,7 @@ class PatchesView(QWidget):
 
         self.model = PatchListModel(self)
         self.list = QTableView(self)
-        self.list.setModel(self.model)
+        self.search_box, self.proxy = patch_search.attach(self, self.list, self.model)
         configure_patch_table(self.list)
         self.bar = QWidget(self)
         self.bar.setStyleSheet("background: #1a1e24;")
@@ -208,7 +211,7 @@ class PatchesView(QWidget):
 
     def _selected(self):
         rows = self.list.selectionModel().selectedRows()
-        return rows[0].row() if rows else None
+        return self.proxy.slot_of_row(rows[0].row()) if rows else None
 
     # actions
     def browse_backup(self):
@@ -345,7 +348,7 @@ class PatchesView(QWidget):
         group restores the whole backup (FUN_1000476f0 / FUN_1000477b0)."""
         from PySide6.QtWidgets import QMenu
         backup = node.type == "PatchGroup" and node.get("isBackup") == 1
-        row = self.list.currentIndex().row() if self.list.currentIndex().isValid() else -1
+        row = self.proxy.slot_of_row(self.list.currentIndex().row()) if self.list.currentIndex().isValid() else -1
         menu = QMenu(self)
         copy = menu.addAction("Copy to Device")
         copy.setEnabled(self.connected and self.ready and (backup or (node.type == "Patch" and row >= 0)))
@@ -449,12 +452,12 @@ class PatchesView(QWidget):
             mime = event.mimeData()
             if mime.hasFormat(MIME_ROWS) and event.source() is self.list:
                 event.acceptProposedAction()
-                self._show_drop_line(self.list.rowAt(int(event.position().y())))
+                self._show_drop_line(self.proxy.slot_of_row(self.list.rowAt(int(event.position().y()))))
                 if event.type() == QEvent.Type.Drop:
                     self._show_drop_line(None)
                     import json
                     rows = json.loads(bytes(mime.data(MIME_ROWS)).decode())
-                    target = self.list.rowAt(int(event.position().y()))
+                    target = self.proxy.slot_of_row(self.list.rowAt(int(event.position().y())))
                     if rows and target >= 0:
                         self.move_patch(rows[0], target)
                 return True
@@ -464,7 +467,7 @@ class PatchesView(QWidget):
             if event.type() == QEvent.Type.Drop:
                 import json
                 path = json.loads(bytes(mime.data(MIME_POOL)).decode())
-                row = self.list.rowAt(int(event.position().y()))
+                row = self.proxy.slot_of_row(self.list.rowAt(int(event.position().y())))
                 self.import_from_pool(node_at(self.pool_store.tree, path), row)
             return True
         return super().eventFilter(obj, event)
@@ -479,7 +482,7 @@ class PatchesView(QWidget):
         if row is None or row < 0:
             self._drop_line.hide()
             return
-        rect = self.list.visualRect(self.model.index(row, 0))
+        rect = self.list.visualRect(self.proxy.index_of_slot(row))
         self._drop_line.setGeometry(0, rect.top(), self.list.viewport().width(), 2)
         self._drop_line.show()
         self._drop_line.raise_()
@@ -487,6 +490,9 @@ class PatchesView(QWidget):
     def move_patch(self, src, dst):
         """A row dragged onto another: the patch moves there and the ones in between shift, as
         Guitar Lab (recorded: MYOWNCOMPS 99 -> 101 rewrote 99, 100, 101)."""
+        if self.proxy.filtering():
+            self.window.show_error("Clear the search to move patches")
+            return
         if src == dst or self._saving is not None or self._imports or not self.connected or not self.ready:
             return
         order = list(range(len(self.slots)))

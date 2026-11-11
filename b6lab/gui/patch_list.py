@@ -1,19 +1,12 @@
 """Table model for the 240 patch slots."""
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, Qt
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate
 
 from b6lab import ptcf
+from b6lab.search import slot_label  # noqa: F401  (re-exported)
 
 COLUMNS = ["Patch Number", "Patch Name", "Comment"]
-
-
-def slot_label(slot):
-    """The B6's patch number: banks A..Z, AA..AZ, BA..BH (60 banks of 4), then the patch
-    number 001-240: A-001 .. Z-104, AA-105 .. AZ-208, BA-209 .. BH-240."""
-    bank = slot // 4
-    letters = chr(65 + bank) if bank < 26 else chr(64 + bank // 26) + chr(65 + bank % 26)
-    return f"{letters}-{slot + 1:03d}"
 
 
 # PatchListComponent (decompiled Mac binary, paintRowBackground FUN_100118e60, paintCell
@@ -42,11 +35,11 @@ class PatchRowDelegate(QStyledItemDelegate):
         p.setRenderHint(p.RenderHint.Antialiasing)
         p.setRenderHint(p.RenderHint.TextAntialiasing)
         r = option.rect
-        row, col = index.row(), index.column()
+        model = index.model()
+        row, col = model.slot_of_row(index.row()) if hasattr(model, "slot_of_row") else index.row(), index.column()
         group = (row // 4) % 10
         colour = QColor((ODD if row % 2 else EVEN)[group])
         p.fillRect(r, QColor(TABLE_BG))
-        model = index.model()
         if col < 2:
             p.fillRect(r.x(), r.y(), r.width() - 4, r.height() - 4, colour)
         elif row % 2:
@@ -170,9 +163,12 @@ def _name_comment(data):
 
 
 class PatchListModel(QAbstractTableModel):
+    content_changed = Signal()  # patch data changed (not just the modified flag)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []  # (name, comment)
+        self._data = []  # the patches' bytes, for the search
         self._modified = set()
 
     def rowCount(self, parent=QModelIndex()):
@@ -201,13 +197,17 @@ class PatchListModel(QAbstractTableModel):
     def set_all(self, slots):
         self.beginResetModel()
         self._rows = [_name_comment(d) for d in slots]
+        self._data = [bytes(d) for d in slots]
         self._modified.clear()
         self.endResetModel()
+        self.content_changed.emit()
 
     def set_slot(self, slot, data):
         if 0 <= slot < len(self._rows):
             self._rows[slot] = _name_comment(data)
+            self._data[slot] = bytes(data)
             self.dataChanged.emit(self.index(slot, 0), self.index(slot, len(COLUMNS) - 1))
+            self.content_changed.emit()
 
     def set_modified(self, slot, modified):
         if modified == (slot in self._modified):
@@ -218,6 +218,9 @@ class PatchListModel(QAbstractTableModel):
 
     def is_modified(self, slot):
         return slot in self._modified
+
+    def slot_data(self):
+        return list(self._data)
 
     # drag source ("PatchListRows" in Guitar Lab)
     MIME_ROWS = "application/x-guitarlab-patchlistrows"
