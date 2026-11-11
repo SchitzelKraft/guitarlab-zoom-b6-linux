@@ -15,3 +15,14 @@ sealed class MidiMessage {
         override fun toString() = "Channel(${bytes.joinToString(" ") { "%02x".format(it) }})"
     }
 }
+
+/** A MIDI link to a pedal. */
+interface MidiTransport {
+    /** Sends one complete message as it goes on the wire: SysEx with F0 and F7, channel messages raw. */
+    fun send(bytes: ByteArray)
+
+    /** Messages from the pedal, in order. Closed when the link ends. */
+    val incoming: kotlinx.coroutines.channels.ReceiveChannel<MidiMessage>
+
+    fun close()
+}
