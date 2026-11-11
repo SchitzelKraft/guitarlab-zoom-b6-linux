@@ -49,7 +49,7 @@ class ControllerTest {
     }
 
     @Test
-    fun firstTapSelectsSecondToggles() = runTest {
+    fun tapOnlySelectsNeverToggles() = runTest {
         val r = rig()
         val before = r.p.sent.size
         assertTrue(r.c.ui.value.pedals[0].selected)
@@ -62,9 +62,43 @@ class ControllerTest {
         val on = r.c.ui.value.pedals[1].on
         r.c.tapPedal(second)
         settle()
-        assertTrue(r.p.sent.size > before)
-        assertEquals(!on, r.s.state.value.edit!!.effects[second].on)
+        assertEquals(before, r.p.sent.size)
+        assertEquals(on, r.s.state.value.edit!!.effects[second].on)
+        assertEquals(on, r.c.ui.value.pedals[1].on)
+    }
+
+    @Test
+    fun togglePedalKeepsSelection() = runTest {
+        val r = rig()
+        val other = r.c.ui.value.pedals[1].slot
+        assertTrue(r.c.ui.value.pedals[0].selected)
+        val on = r.c.ui.value.pedals[1].on
+        r.c.togglePedal(other)
+        settle()
+        assertEquals(!on, r.s.state.value.edit!!.effects[other].on)
         assertEquals(!on, r.c.ui.value.pedals[1].on)
+        assertTrue(r.c.ui.value.pedals[0].selected)
+        assertFalse(r.c.ui.value.pedals[1].selected)
+    }
+
+    @Test
+    fun demoPatchesAreNotDirtyAfterConnect() = runTest {
+        val demo = listOf(0, 2, 100).map { java.io.File("../app/src/main/assets/generated/demo/$it.bin").readBytes() }
+        val r = rig(FakePedal(demo))
+        assertFalse(r.s.state.value.dirty)
+        assertFalse(r.c.ui.value.canSave)
+        for (i in 0 until 6) {
+            r.c.nextPatch()
+            settle()
+            assertFalse("slot ${r.s.state.value.slot}", r.c.ui.value.canSave)
+        }
+    }
+
+    @Test
+    fun noChangeAfterConnectMeansNotDirty() = runTest {
+        val r = rig()
+        assertFalse(r.s.state.value.dirty)
+        assertFalse(r.c.ui.value.canSave)
     }
 
     @Test
@@ -219,7 +253,7 @@ class ControllerTest {
         val r = rig()
         // the pedal changes patch; the session has not processed the push before the tap's operation runs
         r.p.footswitchTo(1)
-        r.c.tapPedal(0)
+        r.c.togglePedal(0)
         settle()
         assertEquals("patch changed on the pedal", r.c.ui.value.error)
         assertEquals(1, r.s.state.value.slot)

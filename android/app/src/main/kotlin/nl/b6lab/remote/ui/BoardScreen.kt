@@ -17,17 +17,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +73,7 @@ fun BoardScreen(
             .safeDrawingPadding()
             .padding(horizontal = 12.dp),
     ) {
-        Header(ui, controller)
+        Header(ui, controller, landscape)
         Banners(ui)
         val pedals: @Composable (Modifier) -> Unit = { m ->
             PedalRow(ui, controller, loader, landscape, onAddEffect, onLongPressPedal, m)
@@ -86,7 +86,7 @@ fun BoardScreen(
             Spacer(Modifier.height(8.dp))
             dials(Modifier.fillMaxWidth().height(130.dp))
         } else {
-            pedals(Modifier.fillMaxWidth().height(150.dp))
+            pedals(Modifier.fillMaxWidth().height(200.dp))
             Spacer(Modifier.height(12.dp))
             dials(Modifier.fillMaxWidth().weight(1f))
         }
@@ -95,12 +95,8 @@ fun BoardScreen(
 }
 
 @Composable
-private fun Header(ui: BoardUi, c: RemoteController) {
-    Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(ui.header, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1)
-            Text(ui.name, color = B6Colors.Text, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+private fun Header(ui: BoardUi, c: RemoteController, landscape: Boolean) {
+    val controls: @Composable () -> Unit = {
         NavButton("◀") { c.previousPatch() }
         NavButton("▶") { c.nextPatch() }
         Spacer(Modifier.width(8.dp))
@@ -108,17 +104,46 @@ private fun Header(ui: BoardUi, c: RemoteController) {
             Modifier.size(12.dp).clip(CircleShape)
                 .background(if (ui.connected) B6Colors.Ok else B6Colors.Error),
         )
-        Spacer(Modifier.width(12.dp))
-        Button(
-            onClick = { c.save() },
-            enabled = ui.canSave,
-            modifier = Modifier.height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = B6Colors.Accent,
-                disabledContainerColor = B6Colors.Surface,
-                disabledContentColor = B6Colors.TextDim,
-            ),
-        ) { Text("Save", fontSize = 16.sp) }
+        Spacer(Modifier.width(8.dp))
+        SaveButton(ui.canSave) { c.save() }
+    }
+    if (landscape) {
+        Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(ui.header, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1, softWrap = false)
+                Text(ui.name, color = B6Colors.Text, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            controls()
+        }
+    } else {
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text(ui.header, color = B6Colors.TextDim, fontSize = 14.sp, maxLines = 1, softWrap = false)
+            Text(
+                ui.name, color = B6Colors.Text, fontSize = 36.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                controls()
+            }
+        }
+    }
+}
+
+/** A small pill (32 dp) inside a 48 dp touch target. */
+@Composable
+private fun SaveButton(enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.height(48.dp).widthIn(min = 64.dp).clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.height(32.dp).clip(RoundedCornerShape(16.dp))
+                .background(if (enabled) B6Colors.Accent else B6Colors.Surface)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Save", fontSize = 14.sp, color = if (enabled) B6Colors.Background else B6Colors.TextDim)
+        }
     }
 }
 
@@ -170,13 +195,29 @@ private fun PedalRow(
     BoxWithConstraints(modifier) {
         val cell: Dp = if (landscape) (maxWidth - gap * (PLACES - 1)) / PLACES else 96.dp
         val pitch = with(density) { (cell + gap).toPx() }
-        val rowMod = if (landscape) Modifier.fillMaxSize() else Modifier.fillMaxSize().horizontalScroll(rememberScrollState())
+        val scroll = rememberScrollState()
+        val viewport = with(density) { maxWidth.toPx() }
+        val selIndex = ui.pedals.indexOfFirst { it.selected }
+        // the selected pedal is scrolled into view (a new patch selects its first pedal: back to the start)
+        LaunchedEffect(selIndex, used, ui.header, pitch, viewport) {
+            if (landscape || selIndex < 0) return@LaunchedEffect
+            val left = selIndex * pitch
+            val right = left + pitch - with(density) { gap.toPx() }
+            val target = when {
+                left < scroll.value -> left
+                right > scroll.value + viewport -> right - viewport
+                else -> return@LaunchedEffect
+            }
+            scroll.animateScrollTo(target.roundToInt().coerceAtLeast(0))
+        }
+        val rowMod = if (landscape) Modifier.fillMaxSize() else Modifier.fillMaxSize().horizontalScroll(scroll)
         Row(rowMod, horizontalArrangement = Arrangement.spacedBy(gap)) {
             ui.pedals.forEachIndexed { i, p ->
               key(p.slot) {
                 Pedal(
                     view = p, index = i, count = used, pitchPx = pitch, loader = loader,
                     onTap = { c.tapPedal(p.slot) },
+                    onToggle = { c.togglePedal(p.slot) },
                     onLongPress = { onLong(p.slot) },
                     onMoveTo = { target -> c.move(p.slot, ui.pedals[target].slot) },
                     wholeDrag = landscape,

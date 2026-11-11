@@ -6,7 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -73,7 +77,7 @@ fun EffectPicture(fx: EffectInfo?, loader: ImageLoader, grey: Boolean, modifier:
 }
 
 /**
- * One pedal. Tap selects or toggles, long press asks for the chooser. Moving uses the grip strip on top (a
+ * One pedal. Tap selects, the footswitch strip at the bottom switches it on or off, long press asks for the chooser. Moving uses the grip strip on top (a
  * horizontal drag there): the rest of the pedal stays free so a scrolling row can still be scrolled by it.
  * [pitchPx] is the distance between two neighbouring pedals, [index] the position in the row and [count] the row length.
  */
@@ -86,6 +90,7 @@ fun Pedal(
     pitchPx: Float,
     loader: ImageLoader,
     onTap: () -> Unit,
+    onToggle: () -> Unit,
     onLongPress: () -> Unit,
     onMoveTo: (Int) -> Unit,
     wholeDrag: Boolean,
@@ -101,7 +106,16 @@ fun Pedal(
             .graphicsLayer { translationX = dx }
             .clip(shape)
             .background(B6Colors.Surface)
-            .then(if (wholeDrag) Modifier.pointerInput(index, count, pitchPx) {
+            .combinedClickable(onClick = onTap, onLongClick = onLongPress),
+    ) {
+        val fx = view.fx
+        Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
+            EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 60.dp, start = 4.dp, end = 4.dp))
+        }
+        // landscape: the whole pedal moves, except the footswitch strip
+        if (wholeDrag) Box(
+            Modifier.fillMaxSize().padding(bottom = 56.dp)
+            .pointerInput(index, count, pitchPx) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         val target = (index + dx / pitchPx).roundToInt().coerceIn(0, count - 1)
@@ -111,13 +125,8 @@ fun Pedal(
                     onDragCancel = { dx = 0f },
                     onHorizontalDrag = { change, d -> change.consume(); dx += d },
                 )
-            } else Modifier)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress),
-    ) {
-        val fx = view.fx
-        Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.35f)) {
-            EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 6.dp, start = 4.dp, end = 4.dp))
-        }
+            },
+        )
         // portrait: grip strip (56 dp touch area) moves the pedal; landscape: the whole pedal does
         if (!wholeDrag) Box(
             Modifier
@@ -138,14 +147,26 @@ fun Pedal(
         ) {
             Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
         }
-        Box(
+        Row(
             Modifier
-                .align(Alignment.TopEnd)
-                .padding(6.dp)
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
-        )
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(B6Colors.SurfaceHigh)
+                .clickable(onClick = onToggle),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(14.dp).clip(CircleShape)
+                    .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (view.on) "ON" else "OFF",
+                color = if (view.on) B6Colors.Text else B6Colors.TextDim, fontSize = 14.sp,
+            )
+        }
         Box(Modifier.fillMaxSize().drawBehind {
             val w = border.width.toPx()
             drawRoundRect(

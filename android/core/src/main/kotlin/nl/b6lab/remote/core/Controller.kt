@@ -67,15 +67,19 @@ class RemoteController(
 
     // ---- user actions -----------------------------------------------------------------------
 
-    /** First tap on an unselected pedal selects it (nothing is sent); a tap on the selected one switches it. */
+    /** Selects the pedal (nothing is sent); switching it on or off is [togglePedal]. */
     fun tapPedal(slot: Int) {
+        synchronized(lock) {
+            if (_ui.value.pedals.none { it.slot == slot }) return
+            selected = slot
+            publish()
+        }
+    }
+
+    /** Switches the effect at [slot] on or off; the selection stays where it is. */
+    fun togglePedal(slot: Int) {
         val ref = synchronized(lock) {
             if (_ui.value.pedals.none { it.slot == slot }) return
-            if (slot != selected) {
-                selected = slot
-                publish()
-                return
-            }
             shownRef
         } ?: return
         scope.launch { session.toggle(ref, slot) }
