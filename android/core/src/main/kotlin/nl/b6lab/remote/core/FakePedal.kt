@@ -6,8 +6,13 @@ import kotlinx.coroutines.channels.Channel
  * A byte-level fake B6 (firmware 1.00) for tests and demo mode. Reply layouts follow vpedal/pedal.py;
  * edit semantics follow b6lab/fake.py. Deterministic: replies are queued on [incoming] without delay.
  * Every message received goes through [Safety.check], which throws for anything the app must never send.
+ * [busy]: PC mode is held by another program, so `50` is answered `00 11` and the pedal stays out of PC mode.
  */
-class FakePedal(patches: List<ByteArray>, private val autoSave: Boolean = false) : MidiTransport {
+class FakePedal(
+    patches: List<ByteArray>,
+    private val autoSave: Boolean = false,
+    private val busy: Boolean = false,
+) : MidiTransport {
     private companion object {
         const val SLOTS = 240
         const val SLOT_SIZE = 808
@@ -15,6 +20,7 @@ class FakePedal(patches: List<ByteArray>, private val autoSave: Boolean = false)
         const val GLOBAL = 0x64
         val HDR = byteArrayOf(0x52, 0x00, 0x6E)
         val ACK = HDR + byteArrayOf(0x00, 0x00)
+        val BUSY = HDR + byteArrayOf(0x00, 0x11)
         val IDENTITY_REPLY = hex("7e000602526e001a00312e3030")
         val GLOBAL_REPLY = hex(
             "52006e6409340001000500000001320600000000000000010006060000000000000000283232640100020108005001010064000000010101000000",
@@ -177,7 +183,7 @@ class FakePedal(patches: List<ByteArray>, private val autoSave: Boolean = false)
         }
         if (m.size < 4 || at(m, 0) != 0x52) return
         when (at(m, 3)) {
-            0x50 -> { inPcMode = true; reply(ACK) }
+            0x50 -> if (busy) reply(BUSY) else { inPcMode = true; reply(ACK) }
             0x51 -> { inPcMode = false; reply(ACK) }
             0x00 -> Unit // the app's acknowledgement of a dump
             0x33 -> {
