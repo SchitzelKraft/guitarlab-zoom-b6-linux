@@ -205,4 +205,71 @@ class ControllerTest {
         assertNull(r.c.ui.value.error)
         assertFalse(r.c.ui.value.canSave)
     }
+
+    @Test
+    fun nothingFitsGivesNoFreePlaces() = runTest {
+        val r = rig()
+        assertEquals(5, r.s.state.value.edit!!.effects.size)
+        assertEquals(0, r.c.ui.value.freePlaces)
+    }
+
+    @Test
+    fun changeTypeKeepsSelection() = runTest {
+        val r = rig()
+        val third = r.c.ui.value.pedals[2].slot
+        r.c.tapPedal(third)
+        val fx = catalog.effects.values.first { it.fxId != r.s.state.value.edit!!.effects[third].fxId && catalog.fits(r.s.state.value.edit!!, it.fxId, third) }
+        r.c.choose(fx.fxId, third)
+        settle()
+        assertNull(r.c.ui.value.error)
+        assertEquals(fx.fxId, r.s.state.value.edit!!.effects[third].fxId)
+        assertEquals(third, r.c.ui.value.pedals.single { it.selected }.slot)
+    }
+
+    @Test
+    fun chooseNewSelectsTheNewPedal() = runTest {
+        val r = rig()
+        r.p.footswitchTo(57)
+        settle()
+        val fx = catalog.effects.values.first { catalog.fits(r.s.state.value.edit!!, it.fxId) }
+        r.c.choose(fx.fxId, null)
+        settle()
+        assertNull(r.c.ui.value.error)
+        assertEquals(2, r.c.ui.value.pedals.single { it.selected }.slot)
+    }
+
+    @Test
+    fun removeSelectedFallsBack() = runTest {
+        val r = rig()
+        r.p.footswitchTo(1)
+        settle()
+        val last = r.c.ui.value.pedals.last().slot
+        r.c.tapPedal(last)
+        r.c.remove(last)
+        settle()
+        assertNull(r.c.ui.value.error)
+        val sel = r.c.ui.value.pedals.single { it.selected }
+        assertEquals(r.c.ui.value.pedals.last().slot, sel.slot)
+    }
+
+    @Test
+    fun pendingDragDroppedOnPatchChange() = runTest {
+        val r = rig()
+        val knob = r.c.ui.value.knobs.first()
+        r.c.dragKnob(knob.index, knob.max)
+        r.p.footswitchTo(1)
+        runCurrent()
+        val before = r.s.state.value.edit!!.effects[0].params[knob.index]
+        settle()
+        assertEquals(1, r.s.state.value.slot)
+        assertEquals(before, r.s.state.value.edit!!.effects[0].params[knob.index])
+        assertEquals(0, knobMessages(r.p, 0, knob.index, 1000).size)
+    }
+
+    @Test
+    fun tapOnUnknownPedalIgnored() = runTest {
+        val r = rig()
+        r.c.tapPedal(1)
+        assertTrue(r.c.ui.value.pedals[0].selected)
+    }
 }

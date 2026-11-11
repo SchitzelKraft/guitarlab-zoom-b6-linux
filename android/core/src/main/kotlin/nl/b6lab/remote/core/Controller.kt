@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 /** One pedal of the board. [slot] is the chain entry index (what the session operations take). */
 data class PedalView(val slot: Int, val fx: EffectInfo?, val on: Boolean, val selected: Boolean)
@@ -52,7 +53,12 @@ class RemoteController(
     private val _ui = MutableStateFlow(build())
     val ui: StateFlow<BoardUi> = _ui.asStateFlow()
 
-    private val latest = HashMap<Int, Int>()
+    /** A knob value as dragged: what the screen showed (ref, entry) when the finger moved. */
+    private data class Drag(val value: Int, val ref: PatchRef, val entry: Int)
+
+    private val latest = HashMap<Int, Drag>()
+    private var freeRef: PatchRef? = null
+    private var freeCached = 0
     private val sending = HashMap<Int, Job>()
 
     init {
@@ -64,6 +70,7 @@ class RemoteController(
     /** First tap on an unselected pedal selects it (nothing is sent); a tap on the selected one switches it. */
     fun tapPedal(slot: Int) {
         val ref = synchronized(lock) {
+            if (_ui.value.pedals.none { it.slot == slot }) return
             if (slot != selected) {
                 selected = slot
                 publish()
@@ -78,24 +85,28 @@ class RemoteController(
     fun dragKnob(index: Int, value: Int) {
         synchronized(lock) {
             val knob = _ui.value.knobs.firstOrNull { it.index == index } ?: return
-            latest[index] = value.coerceIn(0, knob.max)
+            val ref = shownRef ?: return
+            latest[index] = Drag(value.coerceIn(0, knob.max), ref, selected)
             if (sending[index]?.isActive == true) return
             sending[index] = scope.launch { sendLatest(index) }
         }
     }
 
     private suspend fun sendLatest(index: Int) {
-        var sent: Int? = null
+        var sent: Drag? = null
         while (true) {
             delay(KNOB_THROTTLE_MS)
-            val (value, ref, entry) = synchronized(lock) {
-                Triple(latest[index], shownRef, selected)
-            }
-            if (value == null || value == sent || ref == null) break
-            sent = value
-            session.setKnob(ref, entry, index, value)
+            val next = synchronized(lock) {
+                val d = latest[index]
+                if (d == null || d == sent) {
+                    // decided and unregistered in one step: a drag arriving now starts a new job
+                    sending.remove(index)
+                    null
+                } else d
+            } ?: return
+            sent = next
+            session.setKnob(next.ref, next.entry, index, next.value)
         }
-        synchronized(lock) { sending.remove(index) }
     }
 
     /** With [replaceSlot] changes that entry's type, otherwise adds [fxId] at the end of the chain. */
@@ -112,6 +123,12 @@ class RemoteController(
             // the chain changed by our own insert: continue from the session's new state
             val now = session.state.value.ref ?: return@launch
             session.changeType(now, count, fxId)
+            synchronized(lock) {
+                if (lastState.ref?.slot == now.slot && _ui.value.pedals.any { it.slot == count }) {
+                    selected = count
+                    publish()
+                }
+            }
         }
     }
 
@@ -145,8 +162,16 @@ class RemoteController(
     private fun publish() {
         val ref = lastState.ref
         if (ref != shownRef) {
-            // another patch (or chain): the selection starts again at the first pedal
-            selected = lastState.edit?.effects?.firstOrNull { !it.isTail }?.slot ?: 0
+            val effects = lastState.edit?.effects.orEmpty()
+            val firstShown = effects.firstOrNull { !it.isTail }?.slot ?: 0
+            if (ref?.slot != shownRef?.slot) {
+                // another patch: the selection starts again at the first pedal, pending knob values are dropped
+                selected = firstShown
+                latest.clear()
+            } else if (effects.none { it.slot == selected && !it.isTail }) {
+                // same patch, the chain changed: the nearest shown pedal before the selection, else the first
+                selected = effects.lastOrNull { it.slot < selected && !it.isTail }?.slot ?: firstShown
+            }
             shownRef = ref
         }
         _ui.value = build()
@@ -159,11 +184,16 @@ class RemoteController(
         val effects = edit?.effects.orEmpty()
         val pedals = effects.filter { !it.isTail }
             .map { PedalView(it.slot, catalog.effects[it.fxId], it.on, it.slot == selected) }
-        val free = if (edit == null || effects.size >= Ptcf.MAX_ENTRIES ||
-            catalog.effects.keys.none { catalog.fits(edit, it) }
-        ) 0 else Ptcf.MAX_ENTRIES - effects.size
+        val ref = s.ref
+        if (ref != freeRef) {
+            freeRef = ref
+            freeCached = if (edit == null || effects.size >= Ptcf.MAX_ENTRIES ||
+                catalog.effects.keys.none { catalog.fits(edit, it) }
+            ) 0 else Ptcf.MAX_ENTRIES - effects.size
+        }
+        val free = freeCached
         return BoardUi(
-            header = s.slot?.let { "BANK %02d · %c".format(it / 4 + 1, LETTERS[it % 4]) } ?: "",
+            header = s.slot?.let { "BANK %02d · %c".format(Locale.ROOT, it / 4 + 1, LETTERS[it % 4]) } ?: "",
             name = edit?.name ?: "",
             connected = connected,
             pedals = pedals,
