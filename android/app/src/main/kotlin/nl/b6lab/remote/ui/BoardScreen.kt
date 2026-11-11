@@ -86,7 +86,7 @@ fun BoardScreen(
             Spacer(Modifier.height(4.dp))
             dials(Modifier.fillMaxWidth().weight(1f))
         } else {
-            pedals(Modifier.fillMaxWidth().height(200.dp))
+            pedals(Modifier.fillMaxWidth().height(140.dp))
             Spacer(Modifier.height(12.dp))
             dials(Modifier.fillMaxWidth().weight(1f))
         }
@@ -234,7 +234,6 @@ private fun PedalRow(
 
 @Composable
 private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: (Int) -> Unit, modifier: Modifier) {
-    val selected = ui.pedals.firstOrNull { it.selected }
     if (landscape) {
         // one row, the whole width: the blue outline on the board shows which effect these are
         BoxWithConstraints(modifier) {
@@ -246,16 +245,6 @@ private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: 
         }
     } else {
         Column(modifier) {
-            Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (selected != null) {
-                    Text(selected.fx?.name ?: "", color = B6Colors.Text, fontSize = 18.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        if (selected.on) "ON" else "OFF",
-                        color = if (selected.on) B6Colors.Led else B6Colors.TextDim, fontSize = 14.sp,
-                    )
-                }
-            }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ui.knobs.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {

@@ -119,46 +119,50 @@ fun Pedal(
                 onHorizontalDrag = { change, d -> change.consume(); dx += d },
             )
         }
-        // the body (select, long press for the chooser, move); in portrait it ends above the footswitch strip, in
-        // landscape it is the whole pedal and the footswitch is a band over the bottom of the picture
+        // the body (select, long press for the chooser, move) fills the pedal; the footswitch band overlays its bottom
         Box(
-            Modifier.fillMaxSize().padding(bottom = if (wholeDrag) 0.dp else 56.dp)
+            Modifier.fillMaxSize()
                 .then(if (wholeDrag) moveDrag else Modifier) // landscape: the whole body moves the pedal
                 .combinedClickable(onClick = onTap, onLongClick = onLongPress),
         ) {
             Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
                 EffectPicture(
                     fx, loader, !view.on,
-                    Modifier.fillMaxSize().padding(top = if (wholeDrag) 4.dp else 28.dp, bottom = 4.dp, start = 4.dp, end = 4.dp),
+                    Modifier.fillMaxSize().padding(top = if (wholeDrag) 4.dp else 20.dp, bottom = 4.dp, start = 4.dp, end = 4.dp),
                 )
             }
-            // portrait: the grip strip (56 dp touch area) moves the pedal
+            // portrait: the grip strip (48 dp touch area) moves the pedal
             if (!wholeDrag) Box(
-                Modifier.fillMaxWidth().height(56.dp).then(moveDrag),
+                Modifier.fillMaxWidth().height(48.dp).then(moveDrag),
                 contentAlignment = Alignment.TopCenter,
             ) {
                 Box(Modifier.padding(top = 12.dp).size(width = 28.dp, height = 4.dp).clip(CircleShape).background(B6Colors.TextDim))
             }
         }
-        Row(
+        // footswitch: 48 dp touch area, only the bottom 30 dp is drawn so little of the picture is covered
+        Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(if (wholeDrag) 48.dp else 56.dp)
-                .background(if (wholeDrag) Color.Black.copy(alpha = 0.6f) else B6Colors.SurfaceHigh)
+                .height(48.dp)
                 .combinedClickable(onClick = onToggle, onLongClick = {}),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Box(
-                Modifier.size(14.dp).clip(CircleShape)
-                    .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (view.on) "ON" else "OFF",
-                color = if (view.on) B6Colors.Text else B6Colors.TextDim, fontSize = 14.sp,
-            )
+            Row(
+                Modifier.fillMaxWidth().height(30.dp).background(Color.Black.copy(alpha = 0.6f)),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(10.dp).clip(CircleShape)
+                        .background(if (view.on) B6Colors.Led else Color(0xFF3A1A1A)),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (view.on) "ON" else "OFF",
+                    color = if (view.on) B6Colors.Text else B6Colors.TextDim, fontSize = 12.sp,
+                )
+            }
         }
         Box(Modifier.fillMaxSize().drawBehind {
             val w = border.width.toPx()
