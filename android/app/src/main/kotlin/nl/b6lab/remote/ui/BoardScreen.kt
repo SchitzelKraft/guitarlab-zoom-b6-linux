@@ -100,13 +100,10 @@ fun BoardScreen(
 
 @Composable
 private fun BankLabel(ui: BoardUi, size: androidx.compose.ui.unit.TextUnit) {
-    val letter = ui.bankLetter
-    val bank = if (letter.isNotEmpty()) ui.header.removeSuffix(letter).trimEnd() else ui.header
     Row(verticalAlignment = Alignment.Bottom) {
-        Text(bank, style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = size, maxLines = 1, softWrap = false)
-        if (letter.isNotEmpty()) {
-            Spacer(Modifier.width(5.dp))
-            Text(letter, style = B6Text.Title, color = B6Colors.Amber, fontSize = size, maxLines = 1, softWrap = false)
+        if (ui.bankLetters.isNotEmpty()) {
+            Text(ui.bankLetters, style = B6Text.Title, color = B6Colors.Amber, fontSize = size, maxLines = 1, softWrap = false)
+            Text("-" + ui.patchNumber, style = B6Text.Label, color = B6Colors.SilkscreenDim, fontSize = size, maxLines = 1, softWrap = false)
         }
     }
 }

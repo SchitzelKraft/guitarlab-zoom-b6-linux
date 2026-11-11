@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 /** One pedal of the board. [slot] is the chain entry index (what the session operations take). */
 data class PedalView(val slot: Int, val fx: EffectInfo?, val on: Boolean, val selected: Boolean)
@@ -15,7 +14,7 @@ data class PedalView(val slot: Int, val fx: EffectInfo?, val on: Boolean, val se
 data class KnobView(val index: Int, val name: String, val value: Int, val max: Int, val text: String)
 
 data class BoardUi(
-    /** "Bank 1 B" (bank number without leading zero, then the letter), empty while no patch is known. */
+    /** "Z-104" (bank letters, hyphen, 3-digit patch number), empty while no patch is known. */
     val header: String,
     val name: String,
     val connected: Boolean,
@@ -27,8 +26,10 @@ data class BoardUi(
     val canSave: Boolean,
     val autoSaveWarning: Boolean,
     val error: String?,
-    /** The letter of the header ("B"), shown in the accent colour; empty while no patch is known. */
-    val bankLetter: String = "",
+    /** The bank letters of the header ("Z"), shown in the accent colour; empty while no patch is known. */
+    val bankLetters: String = "",
+    /** The patch number of the header ("104"); empty while no patch is known. */
+    val patchNumber: String = "",
 )
 
 /**
@@ -44,7 +45,6 @@ class RemoteController(
     companion object {
         const val KNOB_THROTTLE_MS = 30L
         const val PATCHES = 240
-        private val LETTERS = "ABCD"
     }
 
     private val lock = Any()
@@ -231,7 +231,7 @@ class RemoteController(
         }
         val free = freeCached
         return BoardUi(
-            header = s.slot?.let { "Bank %d %c".format(Locale.ROOT, it / 4 + 1, LETTERS[it % 4]) } ?: "",
+            header = s.slot?.let { patchLabel(it) } ?: "",
             name = edit?.name ?: "",
             connected = connected,
             pedals = pedals,
@@ -240,7 +240,8 @@ class RemoteController(
             canSave = connected && s.dirty && edit != null,
             autoSaveWarning = connected && s.autoSave,
             error = s.error,
-            bankLetter = s.slot?.let { LETTERS[it % 4].toString() } ?: "",
+            bankLetters = s.slot?.let { bankLetters(it) } ?: "",
+            patchNumber = s.slot?.let { patchNumber(it) } ?: "",
         )
     }
 
