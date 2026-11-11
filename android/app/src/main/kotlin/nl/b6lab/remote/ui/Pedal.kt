@@ -119,14 +119,18 @@ fun Pedal(
                 onHorizontalDrag = { change, d -> change.consume(); dx += d },
             )
         }
-        // the body (select, long press for the chooser, move) ends above the footswitch strip, which is a sibling
+        // the body (select, long press for the chooser, move); in portrait it ends above the footswitch strip, in
+        // landscape it is the whole pedal and the footswitch is a band over the bottom of the picture
         Box(
-            Modifier.fillMaxSize().padding(bottom = 56.dp)
+            Modifier.fillMaxSize().padding(bottom = if (wholeDrag) 0.dp else 56.dp)
                 .then(if (wholeDrag) moveDrag else Modifier) // landscape: the whole body moves the pedal
                 .combinedClickable(onClick = onTap, onLongClick = onLongPress),
         ) {
             Box(Modifier.fillMaxSize().alpha(if (view.on) 1f else 0.3f)) {
-                EffectPicture(fx, loader, !view.on, Modifier.fillMaxSize().padding(top = 28.dp, bottom = 4.dp, start = 4.dp, end = 4.dp))
+                EffectPicture(
+                    fx, loader, !view.on,
+                    Modifier.fillMaxSize().padding(top = if (wholeDrag) 4.dp else 28.dp, bottom = 4.dp, start = 4.dp, end = 4.dp),
+                )
             }
             // portrait: the grip strip (56 dp touch area) moves the pedal
             if (!wholeDrag) Box(
@@ -140,8 +144,8 @@ fun Pedal(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(56.dp)
-                .background(B6Colors.SurfaceHigh)
+                .height(if (wholeDrag) 48.dp else 56.dp)
+                .background(if (wholeDrag) Color.Black.copy(alpha = 0.6f) else B6Colors.SurfaceHigh)
                 .combinedClickable(onClick = onToggle, onLongClick = {}),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,

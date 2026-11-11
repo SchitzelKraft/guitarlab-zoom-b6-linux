@@ -1,6 +1,7 @@
 package nl.b6lab.remote
 
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -19,6 +20,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.b6lab.remote.core.Catalog
@@ -44,6 +47,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyBars(resources.configuration)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val catalog = Catalog.load(assets.open("generated/catalog.json").use { it.readBytes().decodeToString() })
         pedal = PedalConnection(this, catalog)
@@ -110,6 +114,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyBars(newConfig)
+    }
+
+    /** Landscape: system bars hidden (a swipe from the edge shows them for a moment); portrait: shown. */
+    private fun applyBars(config: Configuration) {
+        val c = WindowInsetsControllerCompat(window, window.decorView)
+        if (config.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 

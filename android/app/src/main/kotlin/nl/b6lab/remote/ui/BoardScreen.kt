@@ -84,7 +84,7 @@ fun BoardScreen(
         if (landscape) {
             pedals(Modifier.fillMaxWidth().weight(1f))
             Spacer(Modifier.height(8.dp))
-            dials(Modifier.fillMaxWidth().height(130.dp))
+            dials(Modifier.fillMaxWidth().height(108.dp))
         } else {
             pedals(Modifier.fillMaxWidth().height(200.dp))
             Spacer(Modifier.height(12.dp))
@@ -108,10 +108,10 @@ private fun Header(ui: BoardUi, c: RemoteController, landscape: Boolean) {
         SaveButton(ui.canSave) { c.save() }
     }
     if (landscape) {
-        Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(ui.header, color = B6Colors.TextDim, fontSize = 13.sp, maxLines = 1, softWrap = false)
-                Text(ui.name, color = B6Colors.Text, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ui.name, color = B6Colors.Text, fontSize = 24.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             controls()
         }
@@ -199,7 +199,7 @@ private fun PedalRow(
         val viewport = with(density) { maxWidth.toPx() }
         val selIndex = ui.pedals.indexOfFirst { it.selected }
         // the selected pedal is scrolled into view (a new patch selects its first pedal: back to the start)
-        LaunchedEffect(selIndex, used, ui.header, pitch, viewport) {
+        LaunchedEffect(selIndex, used, ui.header, pitch, viewport, scroll.maxValue) {
             if (landscape || selIndex < 0) return@LaunchedEffect
             val left = selIndex * pitch
             val right = left + pitch - with(density) { gap.toPx() }
@@ -235,22 +235,33 @@ private fun PedalRow(
 @Composable
 private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: (Int) -> Unit, modifier: Modifier) {
     val selected = ui.pedals.firstOrNull { it.selected }
-    Column(modifier) {
+    val label: @Composable () -> Unit = {
         if (selected != null) {
-            Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(selected.fx?.name ?: "", color = B6Colors.Text, fontSize = 18.sp)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    if (selected.on) "ON" else "OFF",
-                    color = if (selected.on) B6Colors.Led else B6Colors.TextDim, fontSize = 14.sp,
-                )
-            }
+            Text(selected.fx?.name ?: "", color = B6Colors.Text, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (selected.on) "ON" else "OFF",
+                color = if (selected.on) B6Colors.Led else B6Colors.TextDim, fontSize = 14.sp,
+            )
         }
-        if (landscape) {
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
-                ui.knobs.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 64.dp) }
+    }
+    if (landscape) {
+        // one row: the selected effect's name and state at the left, then the dials
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(110.dp).padding(end = 8.dp)) { label() }
+            ui.knobs.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 80.dp) }
+        }
+    } else {
+        Column(modifier) {
+            Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (selected != null) {
+                    Text(selected.fx?.name ?: "", color = B6Colors.Text, fontSize = 18.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (selected.on) "ON" else "OFF",
+                        color = if (selected.on) B6Colors.Led else B6Colors.TextDim, fontSize = 14.sp,
+                    )
+                }
             }
-        } else {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ui.knobs.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {
