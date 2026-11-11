@@ -23,6 +23,7 @@ import nl.b6lab.remote.core.Connection
 import nl.b6lab.remote.core.FakePedal
 import nl.b6lab.remote.core.MidiTransport
 import nl.b6lab.remote.core.PedalState
+import nl.b6lab.remote.core.Reconnector
 
 /**
  * Owns the transport and the session of the current connection. A session is single use, so every
@@ -53,23 +54,16 @@ class PedalConnection(context: Context) {
     private var stateJob: Job? = null
     private var started = false
 
-    private var retryJob: Job? = null
+    private val reconnector = Reconnector(
+        scope,
+        isConnected = { session?.state?.value?.connection == Connection.CONNECTED },
+        devicePresent = { UsbMidiTransport.findB6(midi) != null },
+        attempt = ::connectUsb,
+    )
 
     private val callback = object : MidiManager.DeviceCallback() {
         override fun onDeviceAdded(info: MidiDeviceInfo) {
-            if (UsbMidiTransport.isB6(info)) connectWithRetry()
-        }
-    }
-
-    /** Up to [ATTEMPTS] attempts, 1 s apart, while a B6 is present and the connection does not come up. */
-    private fun connectWithRetry() {
-        retryJob?.cancel()
-        retryJob = scope.launch {
-            repeat(ATTEMPTS) { n ->
-                if (!started || connectUsb()) return@launch
-                if (UsbMidiTransport.findB6(midi) == null || n == ATTEMPTS - 1) return@launch
-                delay(1000)
-            }
+            if (UsbMidiTransport.isB6(info)) reconnector.request()
         }
     }
 
@@ -79,13 +73,13 @@ class PedalConnection(context: Context) {
         started = true
         if (!_isDemo.value) _state.value = PedalState(connection = Connection.CONNECTING)
         midi.registerDeviceCallback(callback, Handler(Looper.getMainLooper()))
-        connectWithRetry()
+        reconnector.request()
     }
 
     fun stop() {
         if (!started) return
         started = false
-        retryJob?.cancel()
+        reconnector.cancel()
         midi.unregisterDeviceCallback(callback)
         scope.launch {
             lock.withLock {
@@ -99,7 +93,7 @@ class PedalConnection(context: Context) {
     /** The disconnect (`51`) outlives the activity: it runs on [closer] and is given 1 s. */
     fun destroy() {
         started = false
-        retryJob?.cancel()
+        reconnector.cancel()
         closer.launch {
             withTimeoutOrNull(1000) { lock.withLock { teardown() } }
             transport?.close()
@@ -118,11 +112,10 @@ class PedalConnection(context: Context) {
         }
     }
 
-    /** True when the session is connected (or connecting); false when there is no B6 or the attempt failed. */
+    /** True when the new session is connected; false when there is no B6 or the attempt failed. */
     private suspend fun connectUsb(): Boolean = lock.withLock {
         if (!started) return@withLock true
-        val current = _state.value
-        if (current != null && current.connection != Connection.DISCONNECTED) return@withLock true
+        if (session?.state?.value?.connection == Connection.CONNECTED) return@withLock true
         teardown()
         _isDemo.value = false
         _state.value = PedalState(connection = Connection.CONNECTING)
@@ -132,7 +125,7 @@ class PedalConnection(context: Context) {
             return@withLock false
         }
         run(t)
-        _state.value?.connection == Connection.CONNECTED
+        session?.state?.value?.connection == Connection.CONNECTED
     }
 
     private suspend fun run(t: MidiTransport) {
@@ -152,7 +145,4 @@ class PedalConnection(context: Context) {
         stateJob = null
     }
 
-    private companion object {
-        const val ATTEMPTS = 4
-    }
 }
