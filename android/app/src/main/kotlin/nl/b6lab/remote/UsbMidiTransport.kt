@@ -100,7 +100,7 @@ class UsbMidiTransport private constructor(
             val midi = context.getSystemService(Context.MIDI_SERVICE) as MidiManager
             val info = findB6(midi) ?: return null
             val device = suspendCancellableCoroutine<MidiDevice?> { cont ->
-                midi.openDevice(info, { cont.resume(it) }, Handler(Looper.getMainLooper()))
+                midi.openDevice(info, { dev -> cont.resume(dev) { _, d, _ -> d?.close() } }, Handler(Looper.getMainLooper()))
             } ?: return null
             val input = device.openInputPort(0)
             val output = device.openOutputPort(0)

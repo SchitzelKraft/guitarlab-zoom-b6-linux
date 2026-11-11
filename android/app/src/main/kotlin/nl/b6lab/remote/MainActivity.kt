@@ -46,8 +46,15 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val s = state
                     Text("B6 Remote" + if (isDemo) " (demo)" else "", color = color)
-                    Text("Connection: ${s?.connection ?: Connection.DISCONNECTED}", color = color)
-                    if (s == null) Text("No B6 found", color = color)
+                    val connection = s?.connection ?: Connection.DISCONNECTED
+                    Text(
+                        when (connection) {
+                            Connection.CONNECTED -> "Connected"
+                            Connection.CONNECTING -> "Connecting..."
+                            Connection.DISCONNECTED -> "B6 not connected"
+                        },
+                        color = color,
+                    )
                     if (s != null) {
                         Text("Slot: ${s.slot ?: "-"}", color = color)
                         Text("Patch: ${s.edit?.name ?: "-"}", color = color)
@@ -55,7 +62,7 @@ class MainActivity : ComponentActivity() {
                         Text("Auto save: ${s.autoSave}", color = color)
                         s.error?.let { Text("Error: $it", color = color) }
                     }
-                    if (s == null && demo != null) {
+                    if (connection == Connection.DISCONNECTED && !isDemo && demo != null) {
                         Button(onClick = { pedal.startDemo(demo) }) { Text("Demo") }
                     }
                 }
