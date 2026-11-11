@@ -141,6 +141,8 @@ class MainActivity : ComponentActivity() {
                             contentAlignment = Alignment.Center,
                         ) { Text("Try demo", style = B6Text.Button, fontSize = 18.sp) }
                     }
+                    Spacer(Modifier.height(32.dp))
+                    Text("Version " + BuildConfig.VERSION_NAME, style = B6Text.Label, fontSize = 14.sp, color = B6Colors.SilkscreenDim)
                 }
             }
         }

@@ -32,3 +32,8 @@ android/**/build/
 android/.gradle/
 android/app/src/main/assets/generated/
 android/core/src/test/resources/fixtures/
+
+# Release signing and output
+android/keystore.properties
+*.jks
+android/dist/
