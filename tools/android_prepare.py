@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from b6lab import library, ptcf  # noqa: E402
 from b6lab.codec import crc_tail, pack7  # noqa: E402
 from b6lab.midi import B6  # noqa: E402
 
@@ -51,9 +52,61 @@ def replies_fixture():
         for i, (p, data, body) in enumerate(entries) if i % 24 == 0])
 
 
+SVT_TAILS = ROOT / "backup/b6-20261107-0139/001_SVT Drive.zptc"
+EDIT_SLOTS = (1, 3, 101)
+SLOT_IMAGE = 808
+
+
+def _model(p):
+    return {"name": p.name,
+            "effects": [{"slot": e.slot, "fx_id": e.fx_id, "on": e.on, "params": e.params,
+                         "is_tail": e.is_tail} for e in p.effects]}
+
+
+def _edits(data):
+    """Each chain edit applied to a fresh parse, encoded (null when Python refuses it)."""
+    ops = {"set_param": lambda p: ptcf.set_param(p, 0, 0, 37),
+           "set_on": lambda p: ptcf.set_on(p, 0, False),
+           "set_type": lambda p: ptcf.set_type(p, 0, 0x07090010),
+           "insert_entry": lambda p: ptcf.insert_entry(p, 1),
+           "delete_entry": lambda p: ptcf.delete_entry(p, 0),
+           "move_entry": lambda p: ptcf.move_entry(p, 0, 1)}
+    out = {}
+    for name, op in ops.items():
+        p = ptcf.parse(data)
+        try:
+            ok = op(p)
+        except (PermissionError, ValueError):
+            ok = False
+        out[name] = None if ok is False else ptcf.encode(p).hex()
+    return out
+
+
+def ptcf_record(slot, file, image):
+    p = ptcf.parse(image)
+    rec = {"slot": slot, "file": file, "raw": image.hex(), **_model(p),
+           "encoded": ptcf.encode(p).hex()}
+    if slot in EDIT_SLOTS:
+        rec["edits"] = _edits(image)
+    return rec
+
+
+def ptcf_fixture():
+    records = []
+    for p, data, _ in backup_entries():
+        image = bytes(data).ljust(SLOT_IMAGE, b"\0")
+        assert len(image) == SLOT_IMAGE, (p["slot"], len(data))
+        records.append(ptcf_record(p["slot"], p["file"], image))
+    # SVT Drive with tails [F,T,F,T,F], padded to a slot image
+    image = library.load_zptc(SVT_TAILS).ljust(SLOT_IMAGE, b"\0")
+    records.append(ptcf_record(-1, "0139/" + SVT_TAILS.name, image))
+    write_json(FIXTURES, "ptcf.json", records)
+
+
 def fixtures():
     codec_fixture()
     replies_fixture()
+    ptcf_fixture()
 
 
 def assets():
