@@ -10,6 +10,7 @@ import android.media.midi.MidiReceiver
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -31,10 +32,21 @@ class UsbMidiTransport private constructor(
     private val output: MidiOutputPort,
 ) : MidiTransport {
     private val channel = Channel<MidiMessage>(Channel.UNLIMITED)
-    private val assembler = SysexAssembler { channel.trySend(it) }
+    private val assembler = SysexAssembler {
+        if (BuildConfig.DEBUG) {
+            when (it) {
+                is MidiMessage.Sysex -> trace("<<", byteArrayOf(0xF0.toByte()) + it.body + byteArrayOf(0xF7.toByte()))
+                is MidiMessage.Channel -> trace("<<", it.bytes)
+            }
+        }
+        channel.trySend(it)
+    }
     private val removal = object : MidiManager.DeviceCallback() {
         override fun onDeviceRemoved(info: MidiDeviceInfo) {
-            if (info.id == device.info.id) close()
+            if (info.id == device.info.id) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "device removed (id ${info.id})")
+                close("device removed")
+            }
         }
     }
     private val receiver = object : MidiReceiver() {
@@ -60,17 +72,21 @@ class UsbMidiTransport private constructor(
 
     override fun send(bytes: ByteArray) {
         if (closed) return
+        if (BuildConfig.DEBUG) trace(">>", bytes)
         try {
             input.send(bytes, 0, bytes.size)
         } catch (e: IOException) {
-            close()
+            close("write failed: ${e.message}")
         }
     }
 
+    override fun close() = close("close requested")
+
     @Synchronized
-    override fun close() {
+    private fun close(reason: String) {
         if (closed) return
         closed = true
+        if (BuildConfig.DEBUG) Log.d(TAG, "closed: $reason")
         runCatching { midi.unregisterDeviceCallback(removal) }
         runCatching { output.disconnect(receiver) }
         runCatching { output.close() }
@@ -80,6 +96,14 @@ class UsbMidiTransport private constructor(
     }
 
     companion object {
+        private const val TAG = "B6TRACE"
+
+        private fun trace(prefix: String, bytes: ByteArray) {
+            val hex = { b: ByteArray -> b.joinToString(" ") { "%02x".format(it) } }
+            val text = if (bytes.size > 48) "${hex(bytes.copyOf(24))} ... (${bytes.size} bytes)" else hex(bytes)
+            Log.d(TAG, "$prefix $text")
+        }
+
         fun isB6(info: MidiDeviceInfo): Boolean =
             info.type == MidiDeviceInfo.TYPE_USB &&
                 info.inputPortCount >= 1 && info.outputPortCount >= 1 &&
@@ -102,14 +126,17 @@ class UsbMidiTransport private constructor(
             val device = suspendCancellableCoroutine<MidiDevice?> { cont ->
                 midi.openDevice(info, { dev -> cont.resume(dev) { _, d, _ -> d?.close() } }, Handler(Looper.getMainLooper()))
             } ?: return null
+            if (BuildConfig.DEBUG) Log.d(TAG, "device opened (id ${info.id})")
             val input = device.openInputPort(0)
             val output = device.openOutputPort(0)
             if (input == null || output == null) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "ports not available (input=${input != null}, output=${output != null}), closing device")
                 runCatching { input?.close() }
                 runCatching { output?.close() }
                 runCatching { device.close() }
                 return null
             }
+            if (BuildConfig.DEBUG) Log.d(TAG, "ports opened (input 0, output 0)")
             return UsbMidiTransport(midi, device, input, output)
         }
     }
