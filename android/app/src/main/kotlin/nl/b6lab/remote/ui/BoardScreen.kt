@@ -273,6 +273,14 @@ private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: 
 @Composable
 private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit) {
     var local by remember { mutableStateOf<Int?>(null) }
+    // the last value the step buttons sent, until the knob shows it: fast taps add up
+    var stepped by remember(knob.index) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(knob.value) { if (knob.value == stepped) stepped = null }
+    val step = { d: Int ->
+        val v = ((local ?: stepped ?: knob.value) + d).coerceIn(0, knob.max)
+        stepped = v
+        c.dragKnob(knob.index, v)
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = B6Colors.Surface) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
@@ -284,19 +292,20 @@ private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit
                 color = B6Colors.Text, fontSize = 40.sp,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StepButton("-") { c.dragKnob(knob.index, knob.value - 1) }
+                StepButton("-") { step(-1) }
                 Slider(
                     value = (local ?: knob.value).toFloat(),
                     onValueChange = {
                         val v = it.roundToInt().coerceIn(0, knob.max)
                         local = v
+                        stepped = v
                         c.dragKnob(knob.index, v)
                     },
                     onValueChangeFinished = { local = null },
                     valueRange = 0f..knob.max.toFloat().coerceAtLeast(1f),
                     modifier = Modifier.weight(1f).height(56.dp),
                 )
-                StepButton("+") { c.dragKnob(knob.index, knob.value + 1) }
+                StepButton("+") { step(1) }
             }
         }
     }

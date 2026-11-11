@@ -53,8 +53,10 @@ fun Dial(
             .pointerInput(knob.index) {
                 var start = 0
                 var acc = 0f
+                // the last value handed to onValue: a drag back to the shown value must be sent too
+                var last = 0
                 detectVerticalDragGestures(
-                    onDragStart = { start = current.value; acc = 0f; local = start },
+                    onDragStart = { start = current.value; acc = 0f; local = start; last = start },
                     onDragEnd = { local = null },
                     onDragCancel = { local = null },
                     onVerticalDrag = { change, dy ->
@@ -62,7 +64,10 @@ fun Dial(
                         acc -= dy
                         val v = (start + acc / rangePx * current.max).roundToInt().coerceIn(0, current.max)
                         local = v
-                        if (v != current.value) send(v)
+                        if (v != last) {
+                            last = v
+                            send(v)
+                        }
                     },
                 )
             },

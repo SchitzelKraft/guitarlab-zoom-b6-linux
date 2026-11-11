@@ -29,10 +29,10 @@ class ControllerTest {
 
     private class Rig(val p: FakePedal, val s: B6Session, val c: RemoteController)
 
-    private suspend fun TestScope.rig(p: FakePedal = pedal()): Rig {
+    private suspend fun TestScope.rig(p: FakePedal = pedal(), cat: Catalog = catalog): Rig {
         val s = B6Session(backgroundScope, p)
         s.connect()
-        val c = RemoteController(backgroundScope, s, catalog)
+        val c = RemoteController(backgroundScope, s, cat)
         runCurrent()
         return Rig(p, s, c)
     }
@@ -132,6 +132,36 @@ class ControllerTest {
         r.c.dragKnob(knob.index, -5)
         settle()
         assertEquals(0, r.s.state.value.edit!!.effects[0].params[knob.index])
+    }
+
+    @Test
+    fun knobMaxNeverExceedsFieldWidth() = runTest {
+        // a catalogue range wider than the patch field (knob 1: 12 bits) is cut to the field
+        val fx = Ptcf.parse(image(0)).effects[0].fxId
+        val info = catalog.effects.getValue(fx)
+        val wide = info.copy(params = info.params.mapIndexed { i, p -> if (i == 0) p.copy(rawMax = 100000) else p })
+        val r = rig(cat = Catalog(catalog.effects + (fx to wide)))
+        val knob = r.c.ui.value.knobs.first { it.index == 0 }
+        assertEquals(4095, knob.max)
+        r.c.dragKnob(0, 100000)
+        settle()
+        assertEquals(1, knobMessages(r.p, 0, 0, 4095).size)
+        assertEquals(0, r.p.sent.count { it.contentEquals(framed(Msg.setParam(0, 0, 100000)[1])) })
+        assertEquals(4095, r.s.state.value.edit!!.effects[0].params[0])
+    }
+
+    @Test
+    fun fastPatchArrowsCount() = runTest {
+        val r = rig()
+        r.c.nextPatch()
+        r.c.nextPatch()
+        settle()
+        assertEquals(2, r.s.state.value.slot)
+        r.c.previousPatch()
+        r.c.previousPatch()
+        r.c.previousPatch()
+        settle()
+        assertEquals(239, r.s.state.value.slot)
     }
 
     @Test

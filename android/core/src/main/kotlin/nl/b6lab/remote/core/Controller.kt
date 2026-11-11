@@ -49,6 +49,8 @@ class RemoteController(
     private var lastState = PedalState()
     private var shownRef: PatchRef? = null
     private var selected = 0
+    /** Where the patch arrows are heading while a selection is under way, so fast taps add up. */
+    private var targetSlot: Int? = null
 
     private val _ui = MutableStateFlow(build())
     val ui: StateFlow<BoardUi> = _ui.asStateFlow()
@@ -172,8 +174,17 @@ class RemoteController(
     fun nextPatch() = step(1)
 
     private fun step(delta: Int) {
-        val slot = synchronized(lock) { lastState.slot } ?: return
-        scope.launch { session.selectSlot(((slot + delta) % PATCHES + PATCHES) % PATCHES) }
+        val target = synchronized(lock) {
+            val slot = targetSlot ?: lastState.slot ?: return
+            (((slot + delta) % PATCHES + PATCHES) % PATCHES).also { targetSlot = it }
+        }
+        scope.launch {
+            try {
+                session.selectSlot(target)
+            } finally {
+                synchronized(lock) { if (targetSlot == target) targetSlot = null }
+            }
+        }
     }
 
     fun save() {
@@ -235,7 +246,8 @@ class RemoteController(
         return info.params.mapIndexedNotNull { i, p ->
             if (!e.editable(i) || i >= e.params.size) return@mapIndexedNotNull null
             val v = e.params[i]
-            KnobView(i, p.name, v, p.rawMax ?: e.maxValue(i), p.display(v))
+            // the catalogue range, never wider than the patch field
+            KnobView(i, p.name, v, minOf(p.rawMax ?: Int.MAX_VALUE, e.maxValue(i)), p.display(v))
         }
     }
 }
