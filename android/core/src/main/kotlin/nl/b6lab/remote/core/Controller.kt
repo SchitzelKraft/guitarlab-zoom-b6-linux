@@ -189,6 +189,27 @@ class RemoteController(
         }
     }
 
+    /** Patches matching [query] (number, name or effect name), from what the session has read so far. */
+    fun search(query: String): List<SearchHit> = session.index.value.search(query, catalog)
+
+    /** The search index as it fills up: the patches read so far (its `indexed` counts them, of [PATCHES]). */
+    val indexed: StateFlow<PatchIndex> get() = session.index
+
+    val indexStatus: StateFlow<IndexStatus> get() = session.indexStatus
+
+    /** Switches the pedal to [slot], the same way as the patch arrows. */
+    fun openSlot(slot: Int) {
+        if (slot !in 0 until PATCHES) return
+        synchronized(lock) { targetSlot = slot }
+        scope.launch {
+            try {
+                session.selectSlot(slot)
+            } finally {
+                synchronized(lock) { if (targetSlot == slot) targetSlot = null }
+            }
+        }
+    }
+
     fun save() {
         val ref = synchronized(lock) { shownRef } ?: return
         scope.launch { session.save(ref) }

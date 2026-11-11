@@ -24,7 +24,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -64,6 +67,7 @@ fun BoardScreen(
     onAddEffect: (place: Int) -> Unit,
     onLongPressPedal: (slot: Int) -> Unit,
     modifier: Modifier = Modifier,
+    onSearch: () -> Unit = {},
     onReconnect: (() -> Unit)? = null,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -78,7 +82,7 @@ fun BoardScreen(
             .safeDrawingPadding()
             .padding(horizontal = 12.dp),
     ) {
-        Header(ui, controller, landscape)
+        Header(ui, controller, landscape, onSearch)
         Banners(ui, onReconnect)
         if (landscape) {
             PedalGrid(ui, controller, loader, 6, 116.dp, onAddEffect, onLongPressPedal, Modifier.fillMaxWidth())
@@ -109,8 +113,9 @@ private fun BankLabel(ui: BoardUi, size: androidx.compose.ui.unit.TextUnit) {
 }
 
 @Composable
-private fun Header(ui: BoardUi, c: RemoteController, landscape: Boolean) {
+private fun Header(ui: BoardUi, c: RemoteController, landscape: Boolean, onSearch: () -> Unit) {
     val nav: @Composable () -> Unit = {
+        SearchButton(onSearch)
         NavButton("◀") { c.previousPatch() }
         NavButton("▶") { c.nextPatch() }
     }
@@ -171,6 +176,14 @@ private fun SaveButton(enabled: Boolean, onClick: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun SearchButton(onClick: () -> Unit) {
+    Box(
+        Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(Icons.Default.Search, contentDescription = "Search patches", tint = B6Colors.Silkscreen, modifier = Modifier.size(26.dp)) }
 }
 
 @Composable

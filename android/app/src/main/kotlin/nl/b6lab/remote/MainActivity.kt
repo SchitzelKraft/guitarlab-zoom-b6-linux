@@ -42,6 +42,7 @@ import nl.b6lab.remote.core.PatchRef
 import nl.b6lab.remote.ui.B6Theme
 import nl.b6lab.remote.ui.BoardScreen
 import nl.b6lab.remote.ui.ChooserScreen
+import nl.b6lab.remote.ui.SearchScreen
 
 private class ChooserTarget(val ref: PatchRef, val replaceSlot: Int) {
     companion object {
@@ -78,12 +79,15 @@ class MainActivity : ComponentActivity() {
                     // null = closed; else the patch it was opened on (slot and chain) and the entry to change
                     // (-1 = add at the end)
                     var chooser by rememberSaveable(stateSaver = ChooserTarget.Saver) { mutableStateOf<ChooserTarget?>(null) }
+                    var searching by rememberSaveable { mutableStateOf(false) }
                     BoardScreen(
                         ui, c,
+                        onSearch = { searching = true },
                         onAddEffect = { c.currentRef()?.let { chooser = ChooserTarget(it, -1) } },
                         onLongPressPedal = { slot -> c.currentRef()?.let { chooser = ChooserTarget(it, slot) } },
                         onReconnect = if (isDemo || reconnecting) null else ({ pedal.reconnect() }),
                     )
+                    if (searching) SearchScreen(catalog, c, onClose = { searching = false })
                     chooser?.let { t ->
                         val now = c.currentRef()
                         if (now == null || now.slot != t.ref.slot) {

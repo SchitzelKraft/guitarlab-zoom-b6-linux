@@ -34,6 +34,8 @@ class ControllerTest {
         s.connect()
         val c = RemoteController(backgroundScope, s, cat)
         runCurrent()
+        advanceTimeBy(20_000) // the background read of all slots (search index) is done before the test starts
+        runCurrent()
         return Rig(p, s, c)
     }
 

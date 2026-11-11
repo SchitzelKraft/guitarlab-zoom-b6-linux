@@ -51,7 +51,12 @@ data class PedalState(
  * when the pedal is on another patch. Operations are serialized by a mutex and never throw: failures land in [PedalState.error]. A session is used
  * once: after [disconnect] or a lost link (transport closed, or no reply within 3 s) make a new one.
  */
-class B6Session(private val scope: CoroutineScope, private val transport: MidiTransport) {
+class B6Session(
+    private val scope: CoroutineScope,
+    private val transport: MidiTransport,
+    /** Monotonic milliseconds; only used to pace background indexing behind user operations (tests pass the virtual time). */
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
     companion object {
         const val REQUEST_TIMEOUT_MS = 3000L
         /** b6lab/midi.py store_edit waits up to 10 s for the `45` answer in PC mode. */
@@ -62,6 +67,10 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         const val PRESS_WAIT_MS = 50L
         const val EDIT_WAIT_MS = 250L
         const val STORE_WAIT_MS = 100L
+        /** Background indexing waits this long after a user operation, and this long between slots. */
+        const val INDEX_QUIET_MS = 500L
+        const val INDEX_GAP_MS = 20L
+        private const val INDEX_MAX_FAILURES = 3
 
         private val HDR = byteArrayOf(0x52, 0x00, 0x6E)
         private val SOLICITED_DUMP = HDR + byteArrayOf(0x64, 0x12, 0x01)
@@ -83,7 +92,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     }
 
     /** The link is gone: transport closed, send failed or the pedal stopped answering. */
-    private class LinkLost(message: String) : Exception(message)
+    private class LinkLost(message: String, val timeout: Boolean = false) : Exception(message)
 
     /** An operation the pedal or the session refused; the message goes to [PedalState.error]. */
     private class Refused(message: String) : Exception(message)
@@ -94,6 +103,15 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     private val _state = MutableStateFlow(PedalState())
     val state: StateFlow<PedalState> = _state.asStateFlow()
+
+    private val _index = MutableStateFlow(PatchIndex())
+    /** The stored patches read in the background after [connect] (name and effects, for search); fills up to 240. */
+    val index: StateFlow<PatchIndex> = _index.asStateFlow()
+
+    private val _indexStatus = MutableStateFlow(IndexStatus.RUNNING)
+    /** Whether the background read is still going, finished, or gave up (the pedal stopped answering reads). */
+    val indexStatus: StateFlow<IndexStatus> = _indexStatus.asStateFlow()
+    @Volatile private var lastUserOp = Long.MIN_VALUE / 2
 
     private val mutex = Mutex()
     private val sendLock = Any()
@@ -136,7 +154,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
             val autoSave = parseAutoSave(sysexRequest(Msg.GLOBAL, GLOBAL_REPLY))
             val slot = selectedSlot()
             val edit = readEdit()
-            stored = readStored(slot)
+            stored = readStored(slot).also { indexSlot(slot, it) }
             _state.value = PedalState(Connection.CONNECTED, slot, edit, isDirty(edit), autoSave, pc, null)
         } catch (e: CancellationException) {
             throw e
@@ -145,6 +163,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
             return
         }
         startFollowing()
+        scope.launch(work) { indexAll() }
     }
 
     /** Leaves PC mode (`51`) and closes the transport. */
@@ -256,7 +275,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         }
         delay(STORE_WAIT_MS)
         val edit = readEdit()
-        stored = readStored(slot)
+        stored = readStored(slot).also { indexSlot(slot, it) }
         setEdit(edit)
         if (!Ptcf.samePatch(before.raw, stored!!)) throw Refused("save failed")
     }
@@ -270,7 +289,12 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
             return@withLock
         }
         _state.update { it.copy(error = null) }
-        guarded(block)
+        lastUserOp = clock()
+        try {
+            guarded(block)
+        } finally {
+            lastUserOp = clock()
+        }
     }
 
     /** Background work (following the pedal): serialized, only while connected, keeps the user's error. */
@@ -415,15 +439,68 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     private suspend fun poll() {
         val slot = selectedSlot()
         val edit = readEdit()
-        if (slot != _state.value.slot) stored = readStored(slot)
+        if (slot != _state.value.slot) stored = readStored(slot).also { indexSlot(slot, it) }
         _state.update { it.copy(slot = slot, edit = edit, dirty = isDirty(edit)) }
     }
 
     /** Slot [slot] is selected: read its edit buffer and its stored image. */
     private suspend fun load(slot: Int) {
         val edit = readEdit()
-        stored = readStored(slot)
+        stored = readStored(slot).also { indexSlot(slot, it) }
         _state.update { it.copy(slot = slot, edit = edit, dirty = isDirty(edit)) }
+    }
+
+    /** Search index entry of [slot] from its stored image; an unparsable image marks the slot unknown. */
+    private fun indexSlot(slot: Int, image: ByteArray) {
+        val entry = try {
+            PatchIndex.entryOf(Ptcf.parse(image))
+        } catch (e: Exception) {
+            null
+        }
+        _index.update { it.with(slot, entry) }
+    }
+
+    /**
+     * Reads every stored slot once, one attempt per hold of the mutex so a user operation waits for one read at most.
+     * It pauses while the user is working ([INDEX_QUIET_MS] after the last operation) and leaves [INDEX_GAP_MS]
+     * between reads. A failed read (also a damaged reply) is tried once more in a new hold, then the slot is marked
+     * unknown; read errors never reach [PedalState.error]. Three unknown slots in a row mean the pedal does not
+     * answer reads: indexing stops, the session carries on.
+     */
+    private suspend fun indexAll() {
+        var failures = 0
+        for (slot in 0 until PatchIndex.SLOTS) {
+            if (_index.value.entries.containsKey(slot)) continue // already loaded by a patch change or save
+            var image: ByteArray? = null
+            for (attempt in 1..2) {
+                while (_state.value.connection == Connection.CONNECTED && clock() - lastUserOp < INDEX_QUIET_MS) delay(INDEX_GAP_MS * 5)
+                background {
+                    try {
+                        image = readStored(slot)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: LinkLost) {
+                        if (!e.timeout) throw e // the link is closed: ends the session
+                    } catch (e: Exception) {
+                        // a refused or damaged read: a failed attempt, not an error to show
+                    }
+                }
+                if (image != null || _state.value.connection != Connection.CONNECTED) break
+                delay(INDEX_GAP_MS)
+            }
+            if (_state.value.connection != Connection.CONNECTED) break
+            val got = image
+            if (got != null) {
+                failures = 0
+                indexSlot(slot, got)
+            } else {
+                failures += 1
+                _index.update { it.with(slot, null) }
+                if (failures >= INDEX_MAX_FAILURES) break
+            }
+            delay(INDEX_GAP_MS)
+        }
+        _indexStatus.value = if (_index.value.indexed >= PatchIndex.SLOTS) IndexStatus.DONE else IndexStatus.STOPPED
     }
 
     private fun setEdit(p: Patch) = _state.update { it.copy(edit = p, dirty = isDirty(p)) }
@@ -508,7 +585,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     private suspend fun <T : Any> exchange(
         body: ByteArray,
         timeoutMs: Long = REQUEST_TIMEOUT_MS,
-        onTimeout: () -> Exception = { LinkLost("pedal not responding") },
+        onTimeout: () -> Exception = { LinkLost("pedal not responding", timeout = true) },
         accept: (MidiMessage) -> Boolean,
         collect: suspend (ReceiveChannel<MidiMessage>) -> T,
     ): T {
@@ -529,7 +606,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         body: ByteArray,
         prefix: ByteArray,
         timeoutMs: Long = REQUEST_TIMEOUT_MS,
-        onTimeout: () -> Exception = { LinkLost("pedal not responding") },
+        onTimeout: () -> Exception = { LinkLost("pedal not responding", timeout = true) },
     ): ByteArray =
         exchange(body, timeoutMs, onTimeout, { m -> m is MidiMessage.Sysex && (m.body.startsWith(prefix) || isError(m.body)) }) {
             val reply = (it.receive() as MidiMessage.Sysex).body
@@ -566,6 +643,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     // ---- ending -----------------------------------------------------------------------------
 
     private fun stop() {
+        if (_indexStatus.value == IndexStatus.RUNNING) _indexStatus.value = IndexStatus.STOPPED
         work.cancel()
         try {
             transport.close()
