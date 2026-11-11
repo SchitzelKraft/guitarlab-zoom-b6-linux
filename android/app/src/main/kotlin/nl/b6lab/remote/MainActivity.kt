@@ -123,6 +123,15 @@ class MainActivity : ComponentActivity() {
                         Spacer(Modifier.height(8.dp))
                         Text(it, style = B6Text.Label, fontSize = 18.sp, color = B6Colors.LedRed, textAlign = TextAlign.Center)
                     }
+                    if (connection == Connection.DISCONNECTED && !isDemo && !reconnecting && pedal.b6Listed()) {
+                        Spacer(Modifier.height(24.dp))
+                        Box(
+                            Modifier.height(56.dp).clip(RoundedCornerShape(28.dp))
+                                .border(1.5.dp, B6Colors.Silkscreen, RoundedCornerShape(28.dp))
+                                .clickable { pedal.reconnect() }.padding(horizontal = 28.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("Reconnect", style = B6Text.Button, fontSize = 18.sp) }
+                    }
                     if (connection == Connection.DISCONNECTED && !isDemo && demo != null) {
                         Spacer(Modifier.height(24.dp))
                         Box(

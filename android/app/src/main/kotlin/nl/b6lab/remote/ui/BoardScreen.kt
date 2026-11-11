@@ -31,6 +31,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -238,13 +239,20 @@ private fun PedalGrid(
     val used = ui.pedals.size
     val plus = ui.freePlaces.coerceAtMost((PLACES - used).coerceAtLeast(0))
     val nextEntry = (ui.pedals.maxOfOrNull { it.slot } ?: -1) + 1
-    BoxWithConstraints(modifier.height(cellHeight * rows + gap * (rows - 1))) {
+    var dragging by remember { mutableStateOf(false) }
+    // a row without a pedal or "+" collapses to a thin strip, except while a pedal is dragged (it is a drop row)
+    val collapseH = 24.dp
+    val rowH = List(rows) { r ->
+        if (r > 0 && used + plus <= r * cols && !dragging) collapseH else cellHeight
+    }
+    val rowY = rowH.runningFold(0.dp) { acc, h -> acc + h + gap }
+    BoxWithConstraints(modifier.height(rowH.fold(0.dp) { acc, h -> acc + h } + gap * (rows - 1))) {
         val cellW = (maxWidth - gap * (cols - 1)) / cols
         val pitchX = with(density) { (cellW + gap).toPx() }
         val pitchY = with(density) { (cellHeight + gap).toPx() }
         fun place(i: Int) = Modifier
-            .offset(x = (cellW + gap) * (i % cols), y = (cellHeight + gap) * (i / cols))
-            .size(cellW, cellHeight)
+            .offset(x = (cellW + gap) * (i % cols), y = rowY[i / cols])
+            .size(cellW, rowH[i / cols])
         ui.pedals.forEachIndexed { i, p ->
             key(p.slot) {
                 Pedal(
@@ -253,12 +261,19 @@ private fun PedalGrid(
                     onToggle = { c.togglePedal(p.slot) },
                     onLongPress = { onLong(p.slot) },
                     onMoveTo = { target -> c.movePedal(p.slot, target) },
+                    onDragActive = { dragging = it },
                     modifier = place(i),
                 )
             }
         }
-        for (i in used until PLACES) {
-            EmptyPlace(if (i - used < plus) ({ onAdd(nextEntry) }) else null, place(i))
+        for (r in 0 until rows) {
+            if (rowH[r] == collapseH && r > 0) {
+                EmptyPlace(null, Modifier.offset(y = rowY[r]).fillMaxWidth().height(collapseH))
+            } else {
+                for (i in maxOf(used, r * cols) until minOf(PLACES, (r + 1) * cols)) {
+                    EmptyPlace(if (i - used < plus) ({ onAdd(nextEntry) }) else null, place(i))
+                }
+            }
         }
     }
 }
@@ -275,11 +290,14 @@ private fun Dials(ui: BoardUi, c: RemoteController, landscape: Boolean, onFine: 
             }
         }
     } else {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ui.knobs.chunked(3).forEach { row ->
-                Row(Modifier.fillMaxWidth()) {
-                    row.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = 88.dp) }
-                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+        BoxWithConstraints(modifier) {
+            val size = (maxWidth / 4 - 8.dp).coerceIn(48.dp, 96.dp)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ui.knobs.chunked(4).forEach { row ->
+                    Row(Modifier.fillMaxWidth()) {
+                        row.forEach { k -> Dial(k, { c.dragKnob(k.index, it) }, { onFine(k.index) }, Modifier.weight(1f), size = size) }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
             }
         }
@@ -293,6 +311,8 @@ private fun FineSheet(knob: KnobView, c: RemoteController, onDismiss: () -> Unit
     // the last value the step buttons sent, until the knob shows it: fast taps add up
     var stepped by remember(knob.index) { mutableStateOf<Int?>(null) }
     LaunchedEffect(knob.value) { if (knob.value == stepped) stepped = null }
+    // a refused step never shows up as the knob value: do not keep it as the base for the next step
+    LaunchedEffect(stepped) { if (stepped != null) { delay(1000); stepped = null } }
     val step = { d: Int ->
         val v = ((local ?: stepped ?: knob.value) + d).coerceIn(0, knob.max)
         stepped = v

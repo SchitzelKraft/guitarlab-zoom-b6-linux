@@ -461,7 +461,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         }
         when (val push = parsePush(m)) {
             is Push.PatchChanged -> {
-                // recorded at once (operations check it), loaded later under the mutex; only this loop writes these
+                // recorded at once (operations check it), loaded later under the mutex; this loop and selectSlot write these
                 pushedSlot = push.slot
                 pushesArrived += 1
                 patchPushes.trySend(pushesArrived to push.slot)

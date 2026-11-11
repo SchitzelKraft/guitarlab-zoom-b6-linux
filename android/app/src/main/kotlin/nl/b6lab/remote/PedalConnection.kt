@@ -93,6 +93,9 @@ class PedalConnection(context: Context, private val catalog: Catalog) {
         }
     }
 
+    /** A B6 is listed by the MIDI service (it may still fail to open). */
+    fun b6Listed(): Boolean = UsbMidiTransport.findB6(midi) != null
+
     /** The user's Reconnect button. */
     fun reconnect() = reconnector.request()
 

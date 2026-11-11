@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -101,6 +102,7 @@ fun Pedal(
     onLongPress: () -> Unit,
     onMoveTo: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onDragActive: (Boolean) -> Unit = {},
 ) {
     val moveTo by rememberUpdatedState(onMoveTo)
     var dx by remember { mutableFloatStateOf(0f) }
@@ -117,7 +119,9 @@ fun Pedal(
         val rows = (PLACES + cols - 1) / cols
         val moveDrag = Modifier.pointerInput(index, count, cols, pitchX, pitchY) {
             detectDragGestures(
+                onDragStart = { onDragActive(true) },
                 onDragEnd = {
+                    onDragActive(false)
                     val cx = ((index % cols) + 0.5f) * pitchX + dx
                     val cy = ((index / cols) + 0.5f) * pitchY + dy
                     val col = floor(cx / pitchX).toInt().coerceIn(0, cols - 1)
@@ -126,7 +130,7 @@ fun Pedal(
                     dx = 0f; dy = 0f
                     if (target != index) moveTo(target)
                 },
-                onDragCancel = { dx = 0f; dy = 0f },
+                onDragCancel = { dx = 0f; dy = 0f; onDragActive(false) },
                 onDrag = { change, d -> change.consume(); dx += d.x; dy += d.y },
             )
         }
@@ -136,24 +140,28 @@ fun Pedal(
                 EffectPicture(view.fx, loader, !view.on, Modifier.fillMaxSize().padding(4.dp))
             }
         }
-        // footswitch: the band is the whole 48 dp touch area
-        Row(
+        // footswitch: the 48 dp touch area fades in from transparent so the picture's printed name stays readable
+        Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(48.dp)
-                .background(B6Colors.Panel.copy(alpha = 0.85f))
+                .background(Brush.verticalGradient(listOf(Color.Transparent, B6Colors.Panel.copy(alpha = 0.9f))))
                 .combinedClickable(onClick = onToggle, onLongClick = {}),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(if (view.on) B6Colors.LedRed else B6Colors.LedOff))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (view.on) "On" else "Off",
-                style = B6Text.Button, fontSize = 14.sp,
-                color = if (view.on) B6Colors.Silkscreen else B6Colors.SilkscreenDim,
-            )
+            Row(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(24.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(if (view.on) B6Colors.LedRed else B6Colors.LedOff))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (view.on) "On" else "Off",
+                    style = B6Text.Button, fontSize = 14.sp,
+                    color = if (view.on) B6Colors.Silkscreen else B6Colors.SilkscreenDim,
+                )
+            }
         }
         // the selected pedal: amber outline, 3 dp, drawn inside
         if (view.selected) Box(Modifier.fillMaxSize().drawBehind {
