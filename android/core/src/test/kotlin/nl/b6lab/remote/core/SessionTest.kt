@@ -37,6 +37,8 @@ class SessionTest {
 
     private fun TestScope.session(p: MidiTransport) = B6Session(backgroundScope, p)
 
+    private val B6Session.ref: PatchRef get() = state.value.ref!!
+
     private fun ids(p: Patch?) = p!!.effects.map { it.fxId }
     private fun editOf(p: FakePedal) = Ptcf.parse(p.editBuffer())
     private fun sentBodies(p: FakePedal) = p.sent.map { if ((it[0].toInt() and 0xFF) == 0xF0) it.copyOfRange(1, it.size - 1) else it }
@@ -130,7 +132,7 @@ class SessionTest {
         val s = session(p)
         s.connect()
         val before = s.state.value.edit!!
-        s.toggle(2)
+        s.toggle(s.ref, 2)
         val after = s.state.value.edit!!
         assertNull(s.state.value.error)
         assertEquals(!before.effects[2].on, after.effects[2].on)
@@ -142,31 +144,32 @@ class SessionTest {
         assertEquals(Msg.pressEffect(2).filter { isFootswitch(it) }.map { it.toList() }, presses.map { it.toList() })
         // a tail cannot be switched: nothing sent, error set
         val n = p.sent.size
-        s.toggle(1)
+        s.toggle(s.ref, 1)
         assertNotNull(s.state.value.error)
         assertTrue(sentBodies(p).drop(n).none { isFootswitch(it) })
     }
 
     @Test
     fun editRefusedWhenPatchChanged() = runTest {
-        val ops: List<suspend (B6Session) -> Unit> = listOf(
-            { it.toggle(0) },
-            { it.setKnob(0, 0, 10) },
-            { it.changeType(0, 0x5890011) },
-            { it.insert(0) },
-            { it.delete(0) },
-            { it.move(0, 2) },
+        // (operation, busy): without PC mode setKnob reads the edit buffer first; in PC mode it trusts the pushes
+        val ops: List<Pair<suspend (B6Session, PatchRef) -> Unit, Boolean>> = listOf(
+            Pair({ s, r -> s.toggle(r, 0) }, false),
+            Pair({ s, r -> s.setKnob(r, 0, 0, 10) }, true),
+            Pair({ s, r -> s.changeType(r, 0, 0x5890011) }, false),
+            Pair({ s, r -> s.insert(r, 0) }, false),
+            Pair({ s, r -> s.delete(r, 0) }, false),
+            Pair({ s, r -> s.move(r, 0, 2) }, false),
         )
-        for (op in ops) {
-            val p = pedal()
+        for ((op, busy) in ops) {
+            val p = pedal(busy = busy)
             val s = session(p)
             s.connect()
-            val shown = s.state.value.edit!!
+            val shown = s.ref
             // the patch changes on the pedal; the session has not seen the push yet
             p.footswitchTo(1)
-            assertNotEquals(ids(shown), ids(editOf(p)))
+            assertNotEquals(shown.fxIds, ids(editOf(p)))
             val n = p.sent.size
-            op(s)
+            op(s, shown)
             assertEquals("patch changed on the pedal", s.state.value.error)
             // only the edit-buffer read and its ack were sent, no live message
             assertEquals(listOf(Msg.READ_EDIT.toList(), Msg.ACK.toList()), sentBodies(p).drop(n).map { it.toList() })
@@ -179,20 +182,139 @@ class SessionTest {
     }
 
     @Test
+    fun staleRefRefused() = runTest {
+        val ops: List<suspend (B6Session, PatchRef) -> Unit> = listOf(
+            { s, r -> s.toggle(r, 0) },
+            { s, r -> s.setKnob(r, 0, 0, 10) },
+            { s, r -> s.changeType(r, 0, 0x5890011) },
+            { s, r -> s.insert(r, 0) },
+            { s, r -> s.delete(r, 0) },
+            { s, r -> s.move(r, 0, 2) },
+            { s, r -> s.save(r) },
+        )
+        for (op in ops) {
+            val p = pedal()
+            val s = session(p)
+            s.connect()
+            val shown = s.ref
+            // the push is processed before the user's tap reaches the session
+            p.footswitchTo(1)
+            runCurrent()
+            assertEquals(1, s.state.value.slot)
+            val n = p.sent.size
+            op(s, shown)
+            assertEquals("patch changed on the pedal", s.state.value.error)
+            val after = sentBodies(p).drop(n).map { it.toList() }
+            assertTrue(after.toString(), after.all { it == Msg.READ_EDIT.toList() || it == Msg.ACK.toList() })
+            assertTrue(Ptcf.samePatch(p.storedSlot(0), image(0)))
+            assertTrue(Ptcf.samePatch(p.storedSlot(1), image(1)))
+        }
+    }
+
+    @Test
+    fun saveRefusedWhenPatchChanged() = runTest {
+        for (busy in listOf(false, true)) {
+            val p = pedal(busy = busy)
+            val s = session(p)
+            s.connect()
+            s.setKnob(s.ref, 0, 0, 5)
+            val shown = s.ref
+            p.footswitchTo(1) // not yet seen by the session
+            s.save(shown)
+            assertEquals("patch changed on the pedal", s.state.value.error)
+            assertEquals(0, count(p, Msg.store(0)) + count(p, Msg.store(1)))
+            assertTrue(Ptcf.samePatch(p.storedSlot(0), image(0)))
+            assertTrue(Ptcf.samePatch(p.storedSlot(1), image(1)))
+        }
+    }
+
+    @Test
+    fun saveChecksTheSelectedSlot() = runTest {
+        // slot 1 holds the same effects as slot 0: only the `33` check sees the switch
+        val p = FakePedal(listOf(image(0), image(0)))
+        val s = session(p)
+        s.connect()
+        val shown = s.ref
+        p.footswitchTo(1)
+        s.save(shown)
+        assertEquals("patch changed on the pedal", s.state.value.error)
+        assertEquals(0, count(p, Msg.store(0)) + count(p, Msg.store(1)))
+    }
+
+    @Test
+    fun knobStepsAreCheap() = runTest {
+        val p = pedal()
+        val s = session(p)
+        s.connect()
+        val reads = count(p, Msg.READ_EDIT)
+        for (v in 1..20) s.setKnob(s.ref, 2, 0, v)
+        assertNull(s.state.value.error)
+        assertEquals(20, s.state.value.edit!!.effects[2].params[0])
+        assertTrue(s.state.value.dirty)
+        assertEquals(reads, count(p, Msg.READ_EDIT))
+        for (v in 1..20) assertEquals(1, count(p, Msg.setParam(2, 0, v)[1]))
+        assertEquals(20, count(p, Msg.setParam(2, 0, 1)[0]))
+        advanceTimeBy(1000)
+        runCurrent()
+        // one debounced confirming read
+        assertTrue(count(p, Msg.READ_EDIT) - reads in 1..2)
+        assertEquals(20, s.state.value.edit!!.effects[2].params[0])
+        assertTrue(Ptcf.samePatch(s.state.value.edit!!.raw, p.editBuffer()))
+    }
+
+    @Test
+    fun toggleUndoesMisroutedPress() = runTest {
+        val p = pedal()
+        val s = session(p)
+        s.connect()
+        val before = s.state.value.edit!!.effects.map { it.on }
+        p.misroutePresses(2, 4)
+        s.toggle(s.ref, 2)
+        assertEquals("the pedal switched effect [4] instead of 2; undone", s.state.value.error)
+        assertEquals(before, editOf(p).effects.map { it.on })
+        assertEquals(before, s.state.value.edit!!.effects.map { it.on })
+        // the press and the undo press, both at position 2
+        val presses = sentBodies(p).filter { isFootswitch(it) }.map { it.toList() }
+        val one = Msg.pressEffect(2).filter { isFootswitch(it) }.map { it.toList() }
+        assertEquals(one + one, presses)
+        assertEquals(Connection.CONNECTED, s.state.value.connection)
+    }
+
+    @Test
+    fun transportFailureDisconnects() = runTest {
+        val p = pedal()
+        var broken = false
+        val t = object : MidiTransport {
+            override fun send(bytes: ByteArray) {
+                if (broken) throw IllegalStateException("USB port closed")
+                p.send(bytes)
+            }
+            override val incoming: ReceiveChannel<MidiMessage> get() = p.incoming
+            override fun close() = p.close()
+        }
+        val s = session(t)
+        s.connect()
+        broken = true
+        s.setKnob(s.ref, 0, 0, 3)
+        assertEquals(Connection.DISCONNECTED, s.state.value.connection)
+        assertEquals("pedal disconnected", s.state.value.error)
+    }
+
+    @Test
     fun liveEditsFollowB6Lab() = runTest {
         val p = pedal()
         val s = session(p)
         s.connect()
         var n = p.sent.size
-        s.setKnob(2, 0, 21)
+        s.setKnob(s.ref, 2, 0, 21)
         assertEquals(21, editOf(p).effects[2].params[0])
         assertEquals(21, s.state.value.edit!!.effects[2].params[0])
         assertEquals(
-            (listOf(Msg.READ_EDIT, Msg.ACK) + Msg.setParam(2, 0, 21) + listOf(Msg.READ_EDIT, Msg.ACK)).map { it.toList() },
+            Msg.setParam(2, 0, 21).map { it.toList() },
             sentBodies(p).drop(n).map { it.toList() },
         )
         n = p.sent.size
-        s.changeType(4, 0x5890011)
+        s.changeType(s.ref, 4, 0x5890011)
         assertEquals(0x5890011, s.state.value.edit!!.effects[4].fxId)
         // ack of the read, the change, ack of the pedal's own dump, the read-back and its ack
         assertEquals(
@@ -200,12 +322,12 @@ class SessionTest {
                 .map { it.toList() },
             sentBodies(p).drop(n).map { it.toList() },
         )
-        s.delete(4)
+        s.delete(s.ref, 4)
         assertEquals(4, s.state.value.edit!!.effects.size)
-        s.insert(0)
+        s.insert(s.ref, 0)
         assertEquals(5, s.state.value.edit!!.effects.size)
         assertEquals(0, s.state.value.edit!!.effects[0].fxId)
-        s.move(0, 4)
+        s.move(s.ref, 0, 4)
         assertEquals(0, s.state.value.edit!!.effects[4].fxId)
         assertEquals(ids(editOf(p)), ids(s.state.value.edit))
         assertNull(s.state.value.error)
@@ -216,7 +338,7 @@ class SessionTest {
         val p = pedal()
         val s = session(p)
         s.connect()
-        val job = launch { s.changeType(4, 0x5890011) }
+        val job = launch { s.changeType(s.ref, 4, 0x5890011) }
         // inside the 250 ms wait, before the read-back: the pedal's own 64 12 00 dump is already shown
         advanceTimeBy(100)
         runCurrent()
@@ -230,7 +352,7 @@ class SessionTest {
         val p = pedal()
         val s = session(p)
         s.connect()
-        s.setKnob(0, 0, 5)
+        s.setKnob(s.ref, 0, 0, 5)
         assertTrue(s.state.value.dirty)
         s.selectSlot(7)
         advanceTimeBy(1000)
@@ -248,9 +370,9 @@ class SessionTest {
             val s = session(p)
             s.connect()
             s.selectSlot(4)
-            s.setKnob(0, 1, 9)
+            s.setKnob(s.ref, 0, 1, 9)
             assertTrue(s.state.value.dirty)
-            s.save()
+            s.save(s.ref)
             assertNull(s.state.value.error)
             assertFalse(s.state.value.dirty)
             assertTrue(Ptcf.samePatch(p.storedSlot(4), p.editBuffer()))
@@ -278,9 +400,9 @@ class SessionTest {
         runCurrent()
         assertEquals(Connection.DISCONNECTED, s.state.value.connection)
         // operations after the unplug do not throw
-        s.setKnob(0, 0, 3)
-        s.toggle(0)
-        s.save()
+        s.setKnob(s.ref, 0, 0, 3)
+        s.toggle(s.ref, 0)
+        s.save(s.ref)
         s.disconnect()
         assertEquals(Connection.DISCONNECTED, s.state.value.connection)
         assertNotNull(s.state.value.error)
@@ -308,7 +430,7 @@ class SessionTest {
         s.connect()
         s.selectSlot(16)
         assertEquals(Ptcf.MAX_ENTRIES, s.state.value.edit!!.effects.size)
-        s.insert(0)
+        s.insert(s.ref, 0)
         assertNotNull(s.state.value.error)
         assertEquals(Connection.CONNECTED, s.state.value.connection)
         assertTrue(Ptcf.samePatch(s.state.value.edit!!.raw, p.editBuffer()))
@@ -332,10 +454,10 @@ class SessionTest {
         val p = pedal()
         val s = session(p)
         s.connect()
-        s.changeType(0, 0x5890011)
-        s.insert(0)
-        s.delete(0)
-        s.move(0, 2)
+        s.changeType(s.ref, 0, 0x5890011)
+        s.insert(s.ref, 0)
+        s.delete(s.ref, 0)
+        s.move(s.ref, 0, 2)
         advanceTimeBy(1000)
         runCurrent()
         // one dump per 64 13 plus the four the pedal sent on its own after the chain edits
@@ -356,19 +478,19 @@ class SessionTest {
             }
             run { s.connect() }
             run { s.selectSlot(0) }
-            for (e in s.state.value.edit!!.effects.indices) run { s.toggle(e) }
-            for (e in s.state.value.edit!!.effects.indices) run { s.setKnob(e, 0, 7) }
-            run { s.changeType(0, 0x5890011) }
-            run { s.insert(1) }
-            run { s.delete(1) }
-            run { s.move(0, 3) }
+            for (e in s.state.value.edit!!.effects.indices) run { s.toggle(s.ref, e) }
+            for (e in s.state.value.edit!!.effects.indices) run { s.setKnob(s.ref, e, 0, 7) }
+            run { s.changeType(s.ref, 0, 0x5890011) }
+            run { s.insert(s.ref, 1) }
+            run { s.delete(s.ref, 1) }
+            run { s.move(s.ref, 0, 3) }
             p.toggleOnPedal(0)
             p.turnKnob(0, 2, 11)
             p.footswitchTo(16)
             run { }
-            run { s.insert(0) }
+            run { s.insert(s.ref, 0) }
             run { s.selectSlot(2) }
-            run { s.save() }
+            run { s.save(s.ref) }
             run { s.disconnect() }
             assertTrue(errors.toString(), errors.none { it != null && it.contains("blocked") })
             for (b in sentBodies(p)) Safety.check(b)

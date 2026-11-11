@@ -19,6 +19,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 enum class Connection { DISCONNECTED, CONNECTING, CONNECTED }
 
+/** The patch the screen showed when the user acted: slot and effect IDs of every entry (tails included). */
+data class PatchRef(val slot: Int, val fxIds: List<Int>)
+
 data class PedalState(
     val connection: Connection = Connection.DISCONNECTED,
     /** The selected patch slot (0..239). */
@@ -33,13 +36,17 @@ data class PedalState(
     val pcMode: Boolean = false,
     /** Short English message about the last failure, null after a successful operation. */
     val error: String? = null,
-)
+) {
+    /** What the screen shows now; pass it to the live operations, which refuse when the pedal moved on. */
+    val ref: PatchRef? get() = if (slot != null && edit != null) PatchRef(slot, edit.effects.map { it.fxId }) else null
+}
 
 /**
  * One connection to a B6. Ports B6 Lab's protocol (b6lab/midi.py, b6lab/live.py): PC mode, following the pedal,
  * live edits and save. Every message goes through [Safety.check]; every edit dump (`64 12`) is acknowledged.
  *
- * Operations are serialized by a mutex and never throw: failures land in [PedalState.error]. A session is used
+ * Live operations and save take the [PatchRef] the screen showed and refuse ("patch changed on the pedal")
+ * when the pedal is on another patch. Operations are serialized by a mutex and never throw: failures land in [PedalState.error]. A session is used
  * once: after [disconnect] or a lost link (transport closed, or no reply within 3 s) make a new one.
  */
 class B6Session(private val scope: CoroutineScope, private val transport: MidiTransport) {
@@ -61,6 +68,10 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         private val GLOBAL_REPLY = HDR + byteArrayOf(0x64, 0x09)
         private val RESPONSE = HDR + byteArrayOf(0x00)
         private const val BUSY = 0x11
+        private const val SLOT_SIZE = 808
+        private const val PATCH_CHANGED = "patch changed on the pedal"
+        /** How [Safety.check] messages start. */
+        private const val SAFETY_REJECTION = "blocked pedal message"
 
         private fun ByteArray.startsWith(p: ByteArray) = size >= p.size && p.indices.all { this[it] == p[it] }
         private fun slotReply(slot: Int) = HDR + byteArrayOf(0x45, 0, 0, (slot / 4).toByte(), 0, (slot % 4).toByte(), 0)
@@ -144,46 +155,63 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     /** Bank select + program change, then the new patch is read. Unsaved changes are dropped. */
     suspend fun selectSlot(slot: Int) = op {
-        Msg.selectSlot(slot).forEach { send(it) }
+        sendAll(Msg.selectSlot(slot))
         load(slot)
     }
 
     /** Switches effect entry [slot] (b6lab/live.py set_effect_on, with the undo of an unexpected toggle). */
-    suspend fun toggle(slot: Int) = op { toggleEffect(slot) }
+    suspend fun toggle(expected: PatchRef, slot: Int) = op { toggleEffect(expected, slot) }
 
-    suspend fun setKnob(slot: Int, index: Int, value: Int) = chainEdit { now ->
+    /**
+     * Knob [index] of effect entry [slot] (b6lab/live.py send_param). No edit-buffer read per step: in PC mode the
+     * pushes keep [state] current, so [expected] is checked against it (without PC mode one read per call). The
+     * new value is shown at once; one confirming read follows [PARAM_DEBOUNCE_MS] after the last step.
+     */
+    suspend fun setKnob(expected: PatchRef, slot: Int, index: Int, value: Int) = op {
+        checkRef(expected)
+        val now = if (_state.value.pcMode) _state.value.edit!! else checkedEdit(expected)
         val pos = positionOf(now, slot)
         if (!now.effects[slot].editable(index)) throw Refused("knob ${index + 1} of effect entry $slot is not editable")
-        Msg.setParam(pos, index, value).forEach { send(it) }
+        sendAll(Msg.setParam(pos, index, value))
+        setEdit(Ptcf.parse(Ptcf.encode(Ptcf.setParam(now, slot, index, value)).copyOf(SLOT_SIZE)))
+        paramPushes.trySend(Unit)
     }
 
-    suspend fun changeType(slot: Int, fxId: Int) = chainEdit { now ->
-        Msg.changeType(positionOf(now, slot), fxId).forEach { send(it) }
+    suspend fun changeType(expected: PatchRef, slot: Int, fxId: Int) = chainEdit(expected) { now ->
+        sendAll(Msg.changeType(positionOf(now, slot), fxId))
         delay(EDIT_WAIT_MS)
     }
 
-    suspend fun insert(pos: Int) = chainEdit(
+    suspend fun insert(expected: PatchRef, pos: Int) = chainEdit(
+        expected,
         verify = { before, after -> if (after.effects.size == before.effects.size) "the pedal refused to add an effect" else null },
     ) {
         send(Msg.insertEffect(pos))
         delay(EDIT_WAIT_MS)
     }
 
-    suspend fun delete(slot: Int) = chainEdit(
+    suspend fun delete(expected: PatchRef, slot: Int) = chainEdit(
+        expected,
         verify = { before, after -> if (after.effects.size == before.effects.size) "the pedal did not delete the effect" else null },
     ) { now ->
         send(Msg.deleteEffect(positionOf(now, slot)))
         delay(EDIT_WAIT_MS)
     }
 
-    suspend fun move(src: Int, dst: Int) = chainEdit { now ->
+    suspend fun move(expected: PatchRef, src: Int, dst: Int) = chainEdit(expected) { now ->
         send(Msg.moveEffect(positionOf(now, src), dst))
         delay(EDIT_WAIT_MS)
     }
 
-    /** Patch Save (`64 0D`) into the selected slot; the `46` read-back must equal the edit buffer. */
-    suspend fun save() = op {
-        val slot = _state.value.slot ?: throw Refused("no patch selected")
+    /**
+     * Patch Save (`64 0D`) into [expected]'s slot, only when the pedal (`33` and the edit buffer) is still on that
+     * patch; the `46` read-back must equal the edit buffer.
+     */
+    suspend fun save(expected: PatchRef) = op {
+        checkRef(expected)
+        val slot = expected.slot
+        if (selectedSlot() != slot) throw Refused(PATCH_CHANGED)
+        checkedEdit(expected)
         if (_state.value.pcMode) {
             sysexRequest(Msg.store(slot), slotReply(slot), STORE_TIMEOUT_MS)
         } else {
@@ -230,23 +258,29 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
      * re-read. [verify] compares the buffers before and after and returns an error message, or null.
      */
     private suspend fun chainEdit(
+        expected: PatchRef,
         verify: ((Patch, Patch) -> String?)? = null,
         action: suspend (Patch) -> Unit,
     ) = op {
-        val before = checkedEdit()
+        checkRef(expected)
+        val before = checkedEdit(expected)
         action(before)
         val after = readEdit()
         setEdit(after)
         verify?.invoke(before, after)?.let { throw Refused(it) }
     }
 
-    /** The edit buffer, read now; refuses (after showing it) when the pedal is on another patch than the screen. */
-    private suspend fun checkedEdit(): Patch {
-        val shown = _state.value.edit
+    /** Refuses at once (nothing sent) when the session already knows the pedal moved on from [expected]. */
+    private fun checkRef(expected: PatchRef) {
+        if (_state.value.ref != expected) throw Refused(PATCH_CHANGED)
+    }
+
+    /** The edit buffer, read now; refuses (after showing it) when the pedal is on another patch than [expected]. */
+    private suspend fun checkedEdit(expected: PatchRef): Patch {
         val now = readEdit()
-        if (shown == null || now.effects.map { it.fxId } != shown.effects.map { it.fxId }) {
+        if (now.effects.map { it.fxId } != expected.fxIds || _state.value.slot != expected.slot) {
             setEdit(now)
-            throw Refused("patch changed on the pedal")
+            throw Refused(PATCH_CHANGED)
         }
         return now
     }
@@ -258,11 +292,12 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     private fun onFlags(p: Patch): Map<Int, Boolean> = p.effects.filter { !it.isTail }.associate { it.slot to it.on }
 
-    private suspend fun toggleEffect(slot: Int) {
-        val shown = _state.value.edit ?: throw Refused("no patch")
+    private suspend fun toggleEffect(expected: PatchRef, slot: Int) {
+        checkRef(expected)
+        val shown = _state.value.edit!!
         if (slot !in shown.effects.indices) throw Refused("no effect entry $slot")
         val on = !shown.effects[slot].on
-        val before = checkedEdit()
+        val before = checkedEdit(expected)
         val flags = onFlags(before)
         if (slot !in flags) throw Refused("effect entry $slot cannot be switched")
         if (flags[slot] == on) {
@@ -290,7 +325,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     /** b6lab/midi.py press_effect: position + 5A press, wait, position + 5A release, wait. */
     private suspend fun press(pos: Int) {
         Msg.pressEffect(pos).chunked(2).forEach { pair ->
-            pair.forEach { send(it) }
+            sendAll(pair)
             delay(PRESS_WAIT_MS)
         }
     }
@@ -385,12 +420,22 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     // ---- requests ---------------------------------------------------------------------------
 
-    private fun send(body: ByteArray) {
-        Safety.check(body)
-        val wire = if ((body[0].toInt() and 0xFF) >= 0x80) body else byteArrayOf(0xF0.toByte()) + body + byteArrayOf(0xF7.toByte())
+    private fun send(body: ByteArray) = sendAll(listOf(body))
+
+    /**
+     * Sends [bodies] back to back under one hold of the send lock, so the read loop's ack never lands inside a
+     * sequence (position + press, position + knob, position + type). All pass [Safety.check] before any is sent.
+     * A failing transport ends the link, except a Safety rejection by the transport itself.
+     */
+    private fun sendAll(bodies: List<ByteArray>) {
+        bodies.forEach { Safety.check(it) }
+        val wire = bodies.map { if ((it[0].toInt() and 0xFF) >= 0x80) it else byteArrayOf(0xF0.toByte()) + it + byteArrayOf(0xF7.toByte()) }
         try {
-            synchronized(sendLock) { transport.send(wire) }
-        } catch (e: java.io.IOException) {
+            synchronized(sendLock) { wire.forEach { transport.send(it) } }
+        } catch (e: IllegalStateException) {
+            if (e.message?.startsWith(SAFETY_REJECTION) == true) throw e
+            throw LinkLost("pedal disconnected")
+        } catch (e: Exception) {
             throw LinkLost("pedal disconnected")
         }
     }

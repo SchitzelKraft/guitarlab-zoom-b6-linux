@@ -48,6 +48,7 @@ class FakePedal(
     private var bank = 0
     private var unplugged = false
     private val typeMemory = HashMap<Int, List<Int>>()
+    private val misrouted = HashMap<Int, Int>()
     private val sentLog = ArrayList<ByteArray>()
     private val channel = Channel<MidiMessage>(Channel.UNLIMITED)
 
@@ -88,6 +89,14 @@ class FakePedal(
         val on = !p.effects[pos].on
         edit(Ptcf.setOn(p, pos, on))
         pushPair(pos, 0, if (on) 1 else 0)
+    }
+
+    /**
+     * From now on a press at position [pos] toggles entry [to] instead (a misbehaving pedal). It stays that way,
+     * so a second press at [pos] toggles [to] back, which is what B6 Lab's undo relies on.
+     */
+    fun misroutePresses(pos: Int, to: Int) {
+        misrouted[pos] = to
     }
 
     /** The USB cable is pulled: no more messages, sending fails. */
@@ -247,7 +256,7 @@ class FakePedal(
             return
         }
         if (module == FOOTSWITCH && param == 0x00) {
-            val pos = position
+            val pos = misrouted[position] ?: position
             if (pos !in p.effects.indices || p.effects[pos].isTail) return
             val now = if (value == 1) !p.effects[pos].on else p.effects[pos].on
             if (value == 1) edit(Ptcf.setOn(p, pos, now))
