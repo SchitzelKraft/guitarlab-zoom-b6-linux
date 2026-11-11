@@ -122,7 +122,52 @@ def format_fixture():
     write_json(FIXTURES, "format.json", out)
 
 
+def messages_fixture():
+    """Every message B6 Lab sends for the builders of Msg, recorded on a stub (no device)."""
+    import time
+    sent = []
+    dev = B6.__new__(B6)
+    dev.sync = False
+    dev.send = lambda payload: sent.append(("sysex", bytes(payload)))
+    dev.send_raw = lambda payload: sent.append(("channel", bytes(payload)))
+    dev.drain = lambda: None
+    dev._recv_channel = lambda timeout: (_ for _ in ()).throw(TimeoutError())
+
+    def fake_request(payload, expect=None, timeout=3.0):
+        sent.append(("sysex", bytes(payload)))
+        return bytes([0x52, 0x00, 0x6E, 0x00, 0x00])
+
+    dev.request = fake_request
+    dev.request_ack = lambda payload, timeout=3.0: fake_request(payload)
+    cases = {
+        "identity": lambda: dev.identity(), "patch_info": lambda: dev.patch_info(),
+        "enter_pc": lambda: dev.enter_sync(), "leave_pc": lambda: dev.leave_sync(),
+        "selected": lambda: dev.selected_slot(timeout=0.1),
+        "read_edit": lambda: dev.read_edit(), "global": lambda: dev.global_info(),
+        "read_patch_5": lambda: dev.read_patch(5),
+        "store_239": lambda: dev.store_edit(239), "select_239": lambda: dev.select_slot(239),
+        "press_2": lambda: dev.press_effect(2),
+        "set_param_4_4_3_57": lambda: dev.set_param(4, 4, 3, 57),
+        "change_type_2": lambda: dev.change_type(2, 0x07090010),
+        "insert_1": lambda: dev.insert_effect(1), "delete_0": lambda: dev.delete_effect(0),
+        "move_0_1": lambda: dev.move_effect(0, 1)}
+    real_sleep, out = time.sleep, {}
+    time.sleep = lambda s: None
+    try:
+        for name, call in cases.items():
+            sent.clear()
+            try:
+                call()
+            except Exception:  # replies are fake; only what was sent matters
+                pass
+            out[name] = [{"kind": k, "hex": b.hex()} for k, b in sent]
+    finally:
+        time.sleep = real_sleep
+    write_json(FIXTURES, "messages.json", out)
+
+
 def fixtures():
+    messages_fixture()
     format_fixture()
     codec_fixture()
     replies_fixture()
