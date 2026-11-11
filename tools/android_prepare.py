@@ -213,6 +213,22 @@ def assets():
     for n in sorted(names):
         shutil.copyfile(svg_dir / f"{n}.svg", gen / "svg" / f"{n}.svg")
     print("copied", len(names), "svg files")
+    demo_slots(gen / "demo")
+
+
+DEMO_SLOTS = (0, 2, 100)  # backup slots 1, 3 and 101 (1-based)
+
+
+def demo_slots(directory):
+    """808-byte images of the demo slots, named by 0-based slot, for the app's Demo mode."""
+    directory.mkdir(parents=True, exist_ok=True)
+    index = json.loads((BACKUP / "index.json").read_text())
+    for p in index["patches"]:
+        if p["slot"] in DEMO_SLOTS:
+            image = library.load_zptc(BACKUP / p["file"]).ljust(SLOT_IMAGE, b"\0")
+            assert len(image) == SLOT_IMAGE, (p["slot"], len(image))
+            (directory / f"{p['slot']}.bin").write_bytes(image)
+            print("wrote", directory / f"{p['slot']}.bin")
 
 
 def main():
