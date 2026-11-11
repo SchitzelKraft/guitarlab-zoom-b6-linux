@@ -110,7 +110,7 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
     /** Patch-change pushes counted by the read loop as they arrive (no mutex needed), and how many are loaded. */
     @Volatile private var pushesArrived = 0
     @Volatile private var pushesLoaded = 0
-    /** The slot of the last patch-change push, or of our own [selectSlot]; null before either. */
+    /** The slot of the last patch-change push, or of our own [selectSlot] in PC mode; null before either. */
     @Volatile private var pushedSlot: Int? = null
     private val paramPushes = Channel<Unit>(Channel.CONFLATED)
 
@@ -166,8 +166,9 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
 
     /** Bank select + program change, then the new patch is read. Unsaved changes are dropped. */
     suspend fun selectSlot(slot: Int) = op {
-        // the pedal follows our own selection, whether or not it announces it with a push
-        pushedSlot = slot
+        // in PC mode the pedal follows our own selection, whether or not it announces it with a push (without PC mode
+        // there are no pushes: the poller reads the slot)
+        if (_state.value.pcMode) pushedSlot = slot
         sendAll(Msg.selectSlot(slot))
         load(slot)
     }
@@ -385,7 +386,8 @@ class B6Session(private val scope: CoroutineScope, private val transport: MidiTr
         scope.launch(work) {
             for ((n, slot) in patchPushes) background {
                 try {
-                    load(slot)
+                    // the newest slot known (a later push or our own selection beats an older push)
+                    load(pushedSlot ?: slot)
                 } finally {
                     pushesLoaded = n
                 }

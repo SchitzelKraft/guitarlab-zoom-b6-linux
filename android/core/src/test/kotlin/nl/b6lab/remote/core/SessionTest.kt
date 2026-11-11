@@ -328,6 +328,40 @@ class SessionTest {
     }
 
     @Test
+    fun ownSelectionWinsOverAnOlderPush() = runTest {
+        // a pedal that does not announce our own selection (no 64 26 for slot 7)
+        val p = pedal()
+        val t = Tap(p, backgroundScope)
+        t.filter = { m -> if (parsePush(m) == Push.PatchChanged(7)) null else m }
+        val s = session(t)
+        s.connect()
+        launch { s.toggle(s.ref, 2) } // holds the session
+        runCurrent()
+        launch { s.selectSlot(7) } // queued
+        runCurrent()
+        p.footswitchTo(5) // its push is loaded after our selection
+        runCurrent()
+        settle()
+        assertEquals(7, p.selectedSlot)
+        assertEquals(7, s.state.value.slot)
+        s.toggle(s.ref, 0)
+        assertNull(s.state.value.error)
+    }
+
+    @Test
+    fun pollingFollowsThePedalAfterOwnSelection() = runTest {
+        val p = pedal(busy = true)
+        val s = session(p)
+        s.connect()
+        s.selectSlot(3)
+        p.footswitchTo(5)
+        settle()
+        assertEquals(5, s.state.value.slot)
+        s.toggle(s.ref, 0)
+        assertNull(s.state.value.error)
+    }
+
+    @Test
     fun saveComparesStoredWithCheckedBuffer() = runTest {
         val p = pedal()
         val t = Tap(p, backgroundScope)
