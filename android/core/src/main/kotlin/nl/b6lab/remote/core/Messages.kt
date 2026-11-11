@@ -18,29 +18,38 @@ object Msg {
     val ACK = sx(0x00, 0x00)
     val GLOBAL = sx(0x64, 0x0A)
 
-    private fun slotBytes(slot: Int) = b(0, 0, slot / 4, 0, slot % 4, 0)
+    private fun pos(p: Int) = p.also { require(it in 0..5) { "position $it" } }
+    private fun slot(s: Int) = s.also { require(it in 0..239) { "slot $it" } }
+
+    private fun slotBytes(slot: Int) = slot(slot).let { b(0, 0, slot / 4, 0, slot % 4, 0) }
 
     fun readPatch(slot: Int) = sx(0x46) + slotBytes(slot)
     fun store(slot: Int) = sx(0x64, 0x0D) + slotBytes(slot)
 
-    fun selectSlot(slot: Int): List<ByteArray> =
+    fun selectSlot(slot: Int): List<ByteArray> = slot(slot).let {
         listOf(b(0xB0, 0x00, 0x00), b(0xB0, 0x20, slot / 4), b(0xC0, slot % 4))
+    }
 
-    private fun position(pos: Int) = ctl(0x64, 0x01) + Codec.to7(pos.toLong(), 5)
+    private fun position(pos: Int) = ctl(0x64, 0x01) + Codec.to7(pos(pos).toLong(), 5)
 
     fun pressEffect(pos: Int): List<ByteArray> = listOf(1L, 0L).flatMap { v ->
         listOf(position(pos), ctl(0x5A, 0x00) + Codec.to7(v, 5))
     }
 
-    fun setParam(pos: Int, index: Int, value: Int): List<ByteArray> =
-        listOf(position(pos), ctl(pos, index + 2) + Codec.to7(value.toLong(), 5))
+    fun setParam(pos: Int, index: Int, value: Int): List<ByteArray> {
+        require(index in 0..125) { "param index $index" }
+        require(value >= 0) { "value $value" }
+        return listOf(position(pos), ctl(pos(pos), index + 2) + Codec.to7(value.toLong(), 5))
+    }
 
-    fun changeType(pos: Int, fxId: Int): List<ByteArray> =
-        listOf(position(pos), ctl(pos, 0x01) + Codec.to7(fxId.toLong() and 0xFFFFFFFFL, 5))
+    fun changeType(pos: Int, fxId: Int): List<ByteArray> {
+        require(fxId in 0..0x1FFFFFFF) { "effect id $fxId" }
+        return listOf(position(pos), ctl(pos, 0x01) + Codec.to7(fxId.toLong(), 5))
+    }
 
-    fun insertEffect(pos: Int) = ctl(0x64, 0x07) + Codec.to7(pos.toLong(), 5)
-    fun deleteEffect(pos: Int) = ctl(0x64, 0x08) + Codec.to7(pos.toLong(), 5)
-    fun moveEffect(src: Int, dst: Int) = ctl(0x64, 0x09, src and 0x7F, dst and 0x7F, 0, 0, 0)
+    fun insertEffect(pos: Int) = ctl(0x64, 0x07) + Codec.to7(pos(pos).toLong(), 5)
+    fun deleteEffect(pos: Int) = ctl(0x64, 0x08) + Codec.to7(pos(pos).toLong(), 5)
+    fun moveEffect(src: Int, dst: Int) = ctl(0x64, 0x09, pos(src), pos(dst), 0, 0, 0)
 }
 
 sealed class Push {
@@ -77,7 +86,15 @@ object Safety {
         fun at(i: Int) = body[i].toInt() and 0xFF
         fun deny(why: String): Nothing =
             throw IllegalStateException("blocked pedal message ($why): " + body.joinToString(" ") { "%02x".format(it) })
-        if (body.size < 4 || at(0) != 0x52 || at(1) != 0x00 || at(2) != 0x6E) return
+        if (body.isEmpty()) deny("empty")
+        if (at(0) >= 0xF0) deny("framing or system byte")
+        if (at(0) >= 0x80) {   // channel message
+            if (body.size !in 2..3 || (1 until body.size).any { at(it) >= 0x80 }) deny("bad channel message")
+            return
+        }
+        if (body.any { it < 0 }) deny("byte of 0x80 or higher inside SysEx")
+        if (at(0) != 0x52) return
+        if (body.size < 4 || at(1) != 0x00 || at(2) != 0x6E) deny("unknown device or short")
         val cmd = at(3)
         if (cmd in 0x01..0x0A) deny("command 01-0A")
         if (cmd == 0x60) deny("command 60")

@@ -67,7 +67,9 @@ class MessagesTest {
     @Test
     fun safetyBlocksForbidden() {
         val blocked = listOf("52 00 6e 64 2d", "52 00 6e 64 3f", "52 00 6e 60 29", "52 00 6e 60",
-            "52 00 6e 64 20 00 02 00 00 00 00 00", "52 00 6e 64 20 00 64 00 00 00 00 00",
+            "52 00 6e 64 20 00 02 00 00 00 00 00 00",
+            "52 00 6e 64 20 00 02 f7 00", "f0 52 00 6e 60 f7", "52 01 6e 60", "52 00 6e 64 20 00 02 80 00",
+            "", "f7", "b0 20 80", "c0 03 03 03", "52 00 6e 64 20 00 64 00 00 00 00 00",
             "52 00 6e 64 20 00 02") + (1..10).map { "52 00 6e %02x 00".format(it) }
         for (s in blocked) {
             try {
@@ -81,6 +83,21 @@ class MessagesTest {
             Msg.moveEffect(5, 4)) + Msg.pressEffect(5) + Msg.changeType(5, 0x07090010) + Msg.selectSlot(239) +
             (0..5).flatMap { pos -> (0..15).flatMap { Msg.setParam(pos, it, 100) } }
         allowed.forEach { Safety.check(it) }
+    }
+
+    @Test
+    fun builderRangeChecks() {
+        val bad = listOf<() -> Any>({ Msg.setParam(6, 0, 0) }, { Msg.setParam(0, 126, 0) }, { Msg.selectSlot(240) },
+            { Msg.selectSlot(512) }, { Msg.readPatch(-1) }, { Msg.store(240) }, { Msg.changeType(0, 0x20000000) },
+            { Msg.insertEffect(6) }, { Msg.deleteEffect(-1) }, { Msg.moveEffect(0, 6) }, { Msg.pressEffect(6) })
+        for (f in bad) {
+            try {
+                f()
+                fail("accepted")
+            } catch (e: IllegalArgumentException) {
+            }
+        }
+        Msg.setParam(5, 125, 0).forEach { Safety.check(it) }
     }
 
     @Test
