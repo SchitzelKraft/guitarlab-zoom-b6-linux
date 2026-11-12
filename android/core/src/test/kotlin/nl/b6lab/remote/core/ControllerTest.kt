@@ -326,10 +326,11 @@ class ControllerTest {
     }
 
     @Test
-    fun nothingFitsGivesNoFreePlaces() = runTest {
+    fun onlyUnknownLoadEffectsFitAFullPatch() = runTest {
         val r = rig()
         assertEquals(5, r.s.state.value.edit!!.effects.size)
-        assertEquals(0, r.c.ui.value.freePlaces)
+        // The DSP load of the SND-RTN effects is unknown (counted as 0), so only they still fit.
+        assertEquals(1, r.c.ui.value.freePlaces)
     }
 
     @Test

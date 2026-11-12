@@ -49,7 +49,7 @@ class CatalogTest {
         val names = catalog.byGroup().map { it.first }
         assertEquals(
             listOf("DYNAMICS", "FILTER", "DRIVE", "PREAMP", "BASS AMP", "CABINET", "MODULATION",
-                "SFX", "DELAY", "REVERB", "PEDAL", "IR"), names)
+                "SFX", "DELAY", "REVERB", "PEDAL", "SND-RTN", "IR"), names)
         assertTrue(catalog.byGroup().all { it.second.isNotEmpty() })
     }
 
@@ -57,12 +57,12 @@ class CatalogTest {
     fun groupIndexOfFindsTheGroupOfAnEffect() {
         val groups = catalog.byGroup()
         for ((i, g) in groups.withIndex()) assertEquals(i, catalog.groupIndexOf(g.second.first().fxId))
-        assertEquals(groups.indexOfFirst { it.first == "IR" }, catalog.groupIndexOf(0x1A000010))
+        assertEquals(groups.indexOfFirst { it.first == "IR" }, catalog.groupIndexOf(0x1B000010))
         assertEquals(0, catalog.groupIndexOf(null))
         assertEquals(0, catalog.groupIndexOf(-1))
     }
 
-    private val ir = 0x1A000010
+    private val ir = 0x1B000010
     private val light = catalog.effects.values.filter { it.dspLoad in 1.0..20.0 && it.group != "IR" }.first().fxId
 
     private fun chain(vararg ids: Int): Patch {
