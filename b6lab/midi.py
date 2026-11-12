@@ -10,6 +10,11 @@ from b6lab.codec import pack7, unpack7, to7, from7, packed_len
 
 HDR = bytes([0x52, 0x00, 0x6E])
 SLOT_SIZE = 808
+# Enable UI (64 0F) after a write outside sync mode: the B6 does not ack it, and sent right
+# after the write ack it was lost 4 times on 2026-11-12, leaving the pedal locked (screen and
+# switches dead, MIDI still answering) until a later 64 0F unlocked it. Wait, then send it twice.
+ENABLE_UI_DELAY = 0.3
+ENABLE_UI_SENDS = 2
 
 
 class DeviceBusy(Exception):
@@ -239,7 +244,9 @@ class B6:
         try:
             write_patch(self, slot, data, timeout=timeout)
         finally:
-            self.send([*HDR, 0x64, 0x0F])
+            for _ in range(ENABLE_UI_SENDS):
+                time.sleep(ENABLE_UI_DELAY)
+                self.send([*HDR, 0x64, 0x0F])
 
     def store_edit(self, slot):
         """Patch Save (`64 0D 00 00 <bank> 00 <pos> 00`): Guitar Lab's SAVE first asks the pedal
