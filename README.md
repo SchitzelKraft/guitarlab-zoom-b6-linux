@@ -6,7 +6,7 @@ Two free apps for the Zoom B6 bass multi-effects pedal, made because Zoom's own 
 | App | Runs on | What it is for | How to get it |
 |---|---|---|---|
 | **B6 Lab** | Linux desktop | Full editor: all 240 patches, effects, knobs, names, patch search, import/export, backups | Run from this repository (see below) |
-| **B6 Remote** | Android phone | Live editing of the active patch from a phone on a mic stand, for practice and on stage | Download the APK from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases) |
+| **B6 Remote** | Android phone | Live editing of the active patch from a phone on a mic stand, for practice and on stage | Download the APK from the [Releases page](https://github.com/SchitzelKraft/zoom-b6-lab/releases) |
 
 Both talk to the pedal over a USB cable; no Zoom drivers are needed. They share the same
 pedal protocol work and the same data files (see [Data files](#data-files-not-in-this-repository)).
@@ -52,7 +52,7 @@ B6 Remote is a separate Android app (an APK you install on the phone). It edits 
 
 ### Download and install
 
-Download `B6Remote-1.2.apk` from the [Releases page](https://github.com/SchitzelKraft/guitarlab-zoom-b6-linux/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
+Download `B6Remote-1.2.apk` from the [Releases page](https://github.com/SchitzelKraft/zoom-b6-lab/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
 
 ### Requirements
 
