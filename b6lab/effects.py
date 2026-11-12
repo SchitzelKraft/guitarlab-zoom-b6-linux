@@ -8,8 +8,9 @@ effect ID u32 LE @0x60, name (NUL-terminated, max 11) @0x64, group name @0x6F, t
 chunks ... PRMJ (Japanese) and PRME (English) parameter JSON:
 {"Parameters": [{"name", "explanation", "blackback", "pedal"}, ...]} in knob order.
 
-IR effects (ID high byte 0x1A/0x1B) have no ZD2 file: ID low byte - 0x10 = index into
-the pedal's IR name list.
+IR effects (ID high byte 0x1B) have no ZD2 file: ID low byte - 0x10 = index into
+the pedal's IR name list. High byte 0x1A is the SND-RTN group (FxLoop, Send, Return), also
+without a ZD2 file; both are filled in by `with_builtin` (parameters verified on the B6).
 """
 import functools
 import json
@@ -22,7 +23,8 @@ from pathlib import Path
 
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "pedal-files" / "effects.json"
 RANGES_PATH = DEFAULT_PATH.with_name("parameter-ranges.json")
-IR_CATEGORIES = (0x1A, 0x1B)
+IR_CATEGORIES = (0x1B,)
+SND_RTN_CATEGORY = 0x1A
 IR_BASE = 0x10
 IR_LOAD = 86.45  # measured, see dsp_load
 
@@ -91,11 +93,77 @@ def parse_ir_names(msg):
     return [msg[45 + 9 * i:54 + 9 * i].decode("ascii", "replace").strip() for i in range(count)]
 
 
+def _p(name, explanation, maximum=100, **kw):
+    return ParamInfo(name, explanation, raw_max=maximum, display_min="0", display_step="1", **kw)
+
+
+def ir_params():
+    return [
+        _p("LO", "Adjusts volume of low frequencies."),
+        _p("HI", "Adjusts volume of high frequencies."),
+        ParamInfo("BAL", "Adjusts the balance between original and effect sounds. When it is set "
+                  "between -100 to -1, the polarity of effect sound is reversed.",
+                  raw_max=200, display_min="-100", display_step="1"),
+        ParamInfo("VOL", "Adjusts the volume.", raw_max=510, display_min="-45.0",
+                  display_step="0.1", display_precision=1),
+    ]
+
+
 def ir_info(fx_id, ir_names):
     i = (fx_id & 0xFF) - IR_BASE
-    if not 0 <= i < len(ir_names):
+    if fx_id >> 24 != IR_CATEGORIES[0] or not 0 <= i < len(ir_names):
         return None
-    return EffectInfo(fx_id, ir_names[i], "IR", f"Impulse response {ir_names[i]} (IR {i + 1})")
+    return EffectInfo(fx_id, ir_names[i], "IR", f"Impulse response {ir_names[i]} (IR {i + 1})",
+                      ir_params())
+
+
+def snd_rtn_effects():
+    """The SND-RTN effects (high byte 0x1A), no ZD2 file; parameters read off the B6 display."""
+    level = "Adjusts the volume."
+    dry = "Adjusts the volume of the unaffected sound."
+    return {
+        0x1A000020: EffectInfo(
+            0x1A000020, "FxLoop", "SND-RTN",
+            "Use this to insert an external effect, for example, between effects on this unit. "
+            "The signal will be sent to the SEND jack from the position where this effect is placed, "
+            "and the signal from the RETURN jack will be returned to the same position.",
+            [_p("Send", "Adjusts the SEND jack output level."),
+             _p("Return", "Adjusts the RETURN jack input level."),
+             _p("Dry", dry), _p("Vol", level)]),
+        0x1A000023: EffectInfo(
+            0x1A000023, "Send", "SND-RTN",
+            "Use this to output sound to an external effect, for example, in the middle of the "
+            "effect chain of this unit. The signal will be sent to the SEND jack from the position "
+            "where this effect is placed.",
+            [_p("Send", "Adjusts the SEND jack output level."), _p("Dry", dry),
+             _p("Mode", "Chooses the function assigned to SEND. When it is set to SUBOUT, the patch "
+                "level and master volume are applied to the output signal to SEND.", 1,
+                display_labels=["SEND", "SUBOUT"]),
+             _p("ON/OFF", "Sets the foot switch function.", 1,
+                display_labels=["LATCH", "UnLATCH"])]),
+        0x1A000026: EffectInfo(
+            0x1A000026, "Return", "SND-RTN",
+            "Use this to mix the sound from an external effect, for example, into the middle of "
+            "the effect chain of this unit. The signal from the RETURN jack will be returned to "
+            "the position where this effect is placed.",
+            [_p("Return", "Adjusts the RETURN jack input level."),
+             _p("Phase", "Set the phase of the RETURN jack input signal.", 1,
+                display_labels=["NORM", "INV"]),
+             _p("Dry", dry), _p("Vol", level)]),
+    }
+
+
+def with_builtin(cat):
+    """Correct `cat` in place: no fake 0x1A IR entries, IR entries carry their four parameters,
+    and the SND-RTN effects are present."""
+    for fx_id in [k for k, v in cat.items() if k >> 24 == SND_RTN_CATEGORY]:
+        del cat[fx_id]
+    for fx_id, info in cat.items():
+        if fx_id >> 24 in IR_CATEGORIES:
+            info.group = "IR"
+            info.params = ir_params()
+    cat.update(snd_rtn_effects())
+    return cat
 
 
 def build(zd2_files, ir_names=()):
@@ -104,10 +172,9 @@ def build(zd2_files, ir_names=()):
         info = parse_zd2(Path(f).read_bytes())
         cat[info.fx_id] = info
     for i, _ in enumerate(ir_names):
-        for hi in IR_CATEGORIES:
-            fx_id = hi << 24 | (i + IR_BASE)
-            cat[fx_id] = ir_info(fx_id, ir_names)
-    return cat
+        fx_id = IR_CATEGORIES[0] << 24 | (i + IR_BASE)
+        cat[fx_id] = ir_info(fx_id, ir_names)
+    return with_builtin(cat)
 
 
 def save(cat, path=DEFAULT_PATH):
@@ -125,6 +192,7 @@ def load(path=DEFAULT_PATH):
     for k, v in raw.items():
         v["params"] = [ParamInfo(**p) for p in v.get("params", [])]
         cat[int(k, 16)] = EffectInfo(**v)
+    with_builtin(cat)
     if Path(path).resolve() == DEFAULT_PATH.resolve():
         _load_parameter_ranges(cat, RANGES_PATH)
     return cat
@@ -171,6 +239,8 @@ def dsp_load(fx_id):
     Guitar Lab shows it as a percentage: load / 2.2 (EFFECT page "Power", EDITOR "Processor"),
     checked on 9 compressors and on Uprising's 78 %. None when the module file is unknown
     (IR effects have no ZD2 file)."""
+    if fx_id >> 24 == SND_RTN_CATEGORY:
+        return None  # unknown
     if fx_id >> 24 in IR_CATEGORIES:
         # IR cabinets have no ZD2 file. Measured on the B6 with Guitar Lab: Warm AC370 (73 %)
         # and SVT Drive (98 %) both leave 86.4..86.5 for their IR; where Guitar Lab gets the

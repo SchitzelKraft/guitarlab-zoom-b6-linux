@@ -15,7 +15,7 @@ PARAM_WIDTHS = [12] * 5 + [8] * ((ENTRY * 8 - PARAM_START - 60) // 8)
 # Effect ID high byte = category, in the order of Zoom's "B6 Effects List".
 CATEGORIES = {0x01: "DYNAMICS", 0x02: "FILTER", 0x03: "DRIVE", 0x04: "PREAMP", 0x05: "BASS AMP",
               0x06: "CABINET", 0x07: "MODULATION", 0x08: "SFX", 0x09: "DELAY", 0x0A: "REVERB",
-              0x0B: "PEDAL", 0x0C: "SND-RTN", 0x1A: "IR", 0x1B: "IR"}
+              0x0B: "PEDAL", 0x0C: "SND-RTN", 0x1A: "SND-RTN", 0x1B: "IR"}
 
 
 @dataclass

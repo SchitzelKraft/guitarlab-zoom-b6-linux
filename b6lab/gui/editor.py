@@ -55,6 +55,7 @@ def _module(fx_id):
 
 
 _ICONS = {}
+_SND_RTN_SVG = {0x1A000020: "FX_LOOP", 0x1A000023: "SEND", 0x1A000026: "RETURN"}
 
 
 def chain_icon(fx_id, wide=False):
@@ -63,17 +64,22 @@ def chain_icon(fx_id, wide=False):
     if key in _ICONS:
         return _ICONS[key]
     hi = fx_id >> 24
-    name = "_IR" if hi in fx_catalog.IR_CATEGORIES else _module(fx_id)
+    name = "_IR" if hi in fx_catalog.IR_CATEGORIES else _SND_RTN_SVG.get(fx_id) or _module(fx_id)
     img = None
     if name and (SVG_DIR / f"{name}.svg").exists():
         r = QSvgRenderer(str(SVG_DIR / f"{name}.svg"))
+        # Size from the SVG's width/height when it has them (Send/Return/FxLoop declare 68 x 96
+        # over a 457 x 644 view box); otherwise from the view box, as Guitar Lab's own SVGs.
+        size = r.defaultSize()
         box = r.viewBoxF()
+        w, h = (size.width(), size.height()) if size.isValid() and size.width() < box.width() else (box.width(), box.height())
+        from PySide6.QtCore import QRectF
         from PySide6.QtGui import QImage
-        img = QImage(int(box.width() / 2), int(box.height() / 2), QImage.Format.Format_ARGB32_Premultiplied)
+        img = QImage(int(w / 2), int(h / 2), QImage.Format.Format_ARGB32_Premultiplied)
         img.fill(0)
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r.render(p)
+        r.render(p, QRectF(0, 0, img.width(), img.height()))
         p.end()
     _ICONS[key] = img
     return img

@@ -28,7 +28,7 @@ def ir_names():
     cat = effects.catalog()
     names = {}
     for fx_id, info in cat.items():
-        if fx_id >> 24 == effects.IR_CATEGORIES[0]:
+        if fx_id >> 24 in effects.IR_CATEGORIES:
             names[(fx_id & 0xFFFFFF) - effects.IR_BASE] = info.name
     return [names[i] for i in sorted(names)]
 

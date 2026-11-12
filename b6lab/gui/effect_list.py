@@ -75,13 +75,16 @@ def effect_icon(fx_id, scale=0.375):
     img = None
     if name and (SVG_DIR / f"{name}.svg").exists():
         r = QSvgRenderer(str(SVG_DIR / f"{name}.svg"))
-        box = r.viewBoxF()
-        img = QImage(round(box.width() * scale), round(box.height() * scale),
-                     QImage.Format.Format_ARGB32_Premultiplied)
+        box, size = r.viewBoxF(), r.defaultSize()
+        # SVGs with a declared width/height smaller than their view box (Send/Return/FxLoop)
+        # are sized by width/height, like chain_icon in editor.py
+        w, h = (size.width(), size.height()) if size.isValid() and size.width() < box.width() else (box.width(), box.height())
+        img = QImage(round(w * scale), round(h * scale), QImage.Format.Format_ARGB32_Premultiplied)
         img.fill(0)
         p = QPainter(img)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r.render(p)
+        from PySide6.QtCore import QRectF
+        r.render(p, QRectF(0, 0, img.width(), img.height()))
         p.end()
     if scale == 0.375:
         _ICONS[fx_id] = img
