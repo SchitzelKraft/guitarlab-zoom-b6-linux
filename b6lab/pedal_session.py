@@ -94,8 +94,10 @@ class PedalSession:
         self.effect_name = effect_name or _catalog_name  # fx_id -> name, for messages
         self._full_backup_done = False
         self._own = {}  # slot (1-240) -> (name, description, empty) written by this session
+        self.audition_path = self.backup_root / "audition.json"
         self._scratch: Optional[int] = None         # slot (1-240) holding the audition patch
         self._audition_from: Optional[int] = None   # slot selected before the audition
+        self._load_audition()
 
     # --- device access -------------------------------------------------------------------
 
@@ -282,22 +284,51 @@ class PedalSession:
             time.sleep(SELECT_SETTLE)
             return bytes(dev.read_edit())
 
+    # --- audition state, kept on disk so a restarted server can still revert ---------------
+
+    def _load_audition(self) -> None:
+        try:
+            state = json.loads(self.audition_path.read_text())
+            self._scratch, self._audition_from = int(state["scratch"]), int(state["audition_from"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self._scratch = self._audition_from = None
+
+    def _set_audition(self, scratch: Optional[int], audition_from: Optional[int]) -> None:
+        self._scratch, self._audition_from = scratch, audition_from
+        if scratch is None:
+            self.audition_path.unlink(missing_ok=True)
+            return
+        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self.audition_path.write_text(json.dumps({"scratch": scratch,
+                                                  "audition_from": audition_from}) + "\n")
+
     def _drop_scratch(self) -> None:
-        """Back to the slot selected before the audition, then empty the scratch slot."""
+        """Back to the slot selected before the audition, then empty the scratch slot. When
+        the scratch slot is no longer the server's unchanged install (stored on the pedal,
+        cleared with clear_slot), it is left as it is and the audition is forgotten."""
         if self._scratch is None:
             return
+        scratch = self._scratch
         self._select(self._audition_from)
-        self.clear(self._scratch)
-        self._scratch = None
+        try:
+            self.clear(scratch)
+        except PedalError as e:
+            if "was not written by the MCP server" in str(e) or "changed since" in str(e):
+                self._set_audition(None, None)
+                raise PedalError(f"the audition slot {scratch} was changed or cleared outside "
+                                 f"the audition; left as it is and the audition is ended "
+                                 f"({e})") from e
+            raise
+        self._set_audition(None, self._audition_from)
 
     def audition(self, data: bytes) -> dict:
-        """Play `data` on the pedal from a scratch Empty slot (Phase 0 decision: `28` writes
-        the selected slot's memory, so it is not used). A new audition replaces the last."""
+        """Play `data` on the pedal from a scratch Empty slot (the user's Phase 0 decision;
+        `28` is not used). A new audition replaces the last."""
         with self._device() as dev:
             self._require_auto_save_off(dev)
             before = dev.selected_slot() + 1
+        start_from = self._audition_from if self._scratch is not None else before
         if self._scratch is None:
-            self._audition_from = before
             candidates = [p["slot"] for p in reversed(self.list_patches(False)["patches"])
                           if p["empty"] and p["slot"] != before]
         else:
@@ -312,9 +343,16 @@ class PedalSession:
                     raise
                 last = e
                 continue
-            self._scratch = slot
+            self._set_audition(slot, start_from)
             time.sleep(SELECT_SETTLE)
-            return {**out, "edit": self.read_edit(), "audition_from": self._audition_from}
+            with self._device() as dev:
+                playing = dev.selected_slot() + 1
+                edit = bytes(dev.read_edit())
+            if playing != slot or used_bytes(edit) != used_bytes(data):
+                raise PedalError(f"the patch is installed in scratch slot {slot} but the pedal "
+                                 f"is not playing it (selected slot {playing}); select slot "
+                                 f"{slot} on the pedal, or revert_edit to clear it")
+            return {**out, "edit": edit, "audition_from": start_from}
         raise PedalError(f"no Empty slot found for the audition ({last})" if last
                          else "no Empty slot left for the audition")
 
@@ -324,7 +362,7 @@ class PedalSession:
         if self._scratch is not None:
             slot = self._audition_from
             self._drop_scratch()
-            self._audition_from = None
+            self._set_audition(None, None)
         else:
             with self._device() as dev:
                 slot = dev.selected_slot() + 1
@@ -405,5 +443,10 @@ class PedalSession:
                                  "it is left as it is")
             removed, _ = _describe(live)
             out = self._write(dev, "clear", slot, empty, live, False)
+        if slot == self._scratch:   # clear_slot on the audition slot ends the audition
+            back = self._audition_from
+            self._set_audition(None, None)
+            if back is not None:
+                self._select(back)
         return {"slot": slot, "removed": removed, "full_backup": out["full_backup"],
                 "message": out["message"]}

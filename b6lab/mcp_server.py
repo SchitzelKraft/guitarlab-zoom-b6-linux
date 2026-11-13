@@ -74,6 +74,9 @@ FILE_WRITE = BACKUP  # writes a local file, never the pedal (build_patch)
 # changes what the pedal plays, never stored (audition writes only its scratch Empty slot)
 LIVE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
                        open_world_hint=False)
+# audition_patch / revert_edit: install to / clear the scratch Empty slot (v1 write path)
+AUDITION = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                           open_world_hint=False)
 MISSING_EFFECTS = ("B6 Lab data files missing: pedal-files/effects.json; "
                    "see README Data files")
 
@@ -609,7 +612,7 @@ def build_server(session: PedalSession, catalog: dict | None = None,
     def pedal_status() -> dict[str, Any]:
         return impl.pedal_status()
 
-    @server.tool(annotations=LIVE, structured_output=True, description=(
+    @server.tool(annotations=AUDITION, structured_output=True, description=(
         "Play a patch on the pedal to try it: give exactly one of file (.zptc) or spec. It is "
         "installed to a scratch Empty slot (the highest free one; a new audition replaces it) "
         "and selected; revert_edit goes back and empties the scratch slot, save_edit keeps it "
@@ -641,7 +644,7 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                       on: bool) -> dict[str, Any]:
         return impl.set_effect_on(entry, effect, on)
 
-    @server.tool(annotations=LIVE, structured_output=True, description=(
+    @server.tool(annotations=AUDITION, structured_output=True, description=(
         "Drop unsaved changes: the pedal plays the stored patch again. After an audition it "
         "returns to the slot selected before and empties the scratch slot."))
     def revert_edit() -> dict[str, Any]:
