@@ -29,7 +29,7 @@ or effect name; Enter or a click switches the pedal to it.
 
 ### Install
 
-    python3 -m venv .venv && .venv/bin/pip install PySide6 pytest pytest-qt
+    python3 -m venv .venv && .venv/bin/pip install PySide6 pytest pytest-qt "mcp>=2.3,<3"
 
 ### Run
 
@@ -130,6 +130,55 @@ does not start properly without them. Without the others, names, icons and pictu
 
 `--fake` mode also needs a backup set of your patches in `backup/` (PATCH page > Backup All,
 while connected to the pedal).
+
+## MCP server
+
+`b6lab/mcp_server.py` is a local MCP server (stdio) that lets Claude Code, or any MCP client,
+work with the B6 through a small set of tools with the safety rules built in: read patches,
+look up effects and the real gear they are modelled on, build patches from a spec (name,
+description, level and a chain of effects with knobs in display units, as the pedal shows
+them) and install them to Empty slots. Slots are numbered 1-240, as on the pedal. It needs
+the data files of B6 Lab (effect catalog) and, for building patches, a full backup in
+`backup/` (patches there provide the reference entry of each effect).
+
+Tools:
+
+| Tool | What it does | Pedal memory |
+|---|---|---|
+| `list_patches` | All 240 slots from the newest full backup (`refresh` re-reads the pedal) | read |
+| `get_patch`, `current_patch` | One patch: effects, knobs, DSP percent, footswitches | read |
+| `list_effects`, `effect_info` | Effect catalog, knobs, DSP load, real gear | none |
+| `validate_patch`, `build_patch` | Check a spec; build it to `downloads/patches/created/` | none |
+| `install_patch` | Write a `.zptc` file or a spec to an Empty slot | write |
+| `clear_slot` | Undo one of the server's own installs | write |
+| `backup_pedal` | Full backup of all 240 slots to `backup/` | read |
+
+Safety rules:
+
+- Patches are installed to Empty slots only; any other slot is refused. The pedal switches
+  to the slot only when asked (`select`).
+- Every write first backs up the slot to `backup/overwritten/`; the first write of each server
+  session also makes a full backup of all 240 slots.
+- Every write is logged in `backup/writes.jsonl`.
+- `clear_slot` only undoes the server's own installs, and only while the slot still holds
+  exactly what it wrote; your own patches are never touched.
+- Only one program can hold the pedal's MIDI port: close B6 Lab while the server talks to the
+  pedal. The server opens the port per tool call and never takes it from another program.
+
+Enable it: `.mcp.json` in this folder registers the server as `b6`; Claude Code picks it up
+when started here (approve the project server when asked). Suggested permission rules for
+`.claude/settings.local.json` (read and offline tools allowed, pedal writes asked every time):
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp__b6__list_patches", "mcp__b6__get_patch", "mcp__b6__current_patch",
+              "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
+              "mcp__b6__build_patch"],
+    "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal"]
+  }
+}
+```
 
 ## Tools
 

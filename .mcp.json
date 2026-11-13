@@ -1,0 +1,1 @@
+{"mcpServers": {"b6": {"command": ".venv/bin/python", "args": ["-m", "b6lab.mcp_server"]}}}

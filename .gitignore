@@ -37,3 +37,6 @@ android/core/src/test/resources/fixtures/
 android/keystore.properties
 *.jks
 android/dist/
+
+# Patches built by the MCP server (b6lab/mcp_server.py)
+downloads/patches/created/
