@@ -27,7 +27,8 @@ from b6lab.device import save_slot, used_bytes, validate_patch
 from b6lab.library import backup_all, list_backups
 from b6lab.midi import B6, DeviceBusy, NotConnected
 from b6lab import live
-from b6lab.patchspec import EMPTY_NAME, chain_effect_ids, is_empty_patch, only_text_changed
+from b6lab.patchspec import (BUDGET, EMPTY_NAME, chain_effect_ids, dsp_load, is_empty_patch,
+                             only_text_changed)
 from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
@@ -285,6 +286,83 @@ class PedalSession:
         if ptcf.parse(edit).effects[entry].on != bool(on):
             raise PedalError(f"the pedal did not switch entry {entry} {'on' if on else 'off'}")
         return edit
+
+    # --- live chain edits (v3): the pedal decides, the read-back reports ------------------
+
+    def _chain(self, data: bytes) -> str:
+        names = [self.effect_name(e.fx_id) if e.fx_id else "(empty)"
+                 for e in ptcf.parse(data).effects if not e.is_tail]
+        return " > ".join(names) or "no effects"
+
+    def _chain_edit(self, entry: int, fx_id: Optional[int], send, check, what: str,
+                    before_check=None) -> bytes:
+        with self._device() as dev:
+            self._require_auto_save_off(dev)
+            edit = bytes(dev.read_edit())
+            if fx_id is not None:
+                self._guard_effect(edit, entry, fx_id)
+            if before_check:
+                before_check(ptcf.parse(edit), edit)
+            send(dev)
+            time.sleep(LIVE_SETTLE)
+            after = bytes(dev.read_edit())
+        if not check(ptcf.parse(edit), ptcf.parse(after)):
+            raise PedalError(f"the pedal did not {what}; it now plays {self._chain(after)} "
+                             "(revert_edit drops it)")
+        return after
+
+    def add_effect(self, entry: int, fx_id: int, expect_at: Optional[int], wide: bool,
+                   load: Optional[float]) -> bytes:
+        def before(p, edit):
+            n = len(p.effects)
+            if expect_at is None and entry != n:
+                raise PedalError(f"entry {entry} is not the end of the chain ({n} entries); "
+                                 "name the effect it goes in front of")
+            if expect_at is not None:
+                self._guard_effect(edit, entry, expect_at)
+            if n >= ptcf.MAX_ENTRIES:
+                raise PedalError("the chain already has 6 entries")
+            if wide and n > ptcf.MAX_ENTRIES - 2:
+                raise PedalError(f"{self.effect_name(fx_id)} takes two entries; no room in a "
+                                 f"chain of {n}")
+            if load is not None and dsp_load(edit) + load > BUDGET:
+                raise PedalError(f"{self.effect_name(fx_id)} would take the DSP total over "
+                                 f"100 % ({(dsp_load(edit) + load) / 2.2:.0f} %)")
+
+        def send(dev):
+            dev.insert_effect(entry)
+            dev.change_type(entry, fx_id)
+
+        def check(_, b):
+            ok = entry < len(b.effects) and b.effects[entry].fx_id == fx_id
+            if ok and wide:
+                ok = entry + 1 < len(b.effects) and b.effects[entry + 1].is_tail
+            return ok
+
+        return self._chain_edit(entry, None, send, check,
+                                f"add {self.effect_name(fx_id)} at entry {entry} (no room "
+                                "or not accepted)", before)
+
+    def remove_effect(self, entry: int, fx_id: int) -> bytes:
+        def check(a, b):
+            width = 2 if entry + 1 < len(a.effects) and a.effects[entry + 1].is_tail else 1
+            return len(b.effects) == len(a.effects) - width
+        return self._chain_edit(entry, fx_id, lambda dev: dev.delete_effect(entry), check,
+                                f"remove {self.effect_name(fx_id)} at entry {entry}")
+
+    def move_effect(self, entry: int, fx_id: int, to: int) -> bytes:
+        def check(a, b):
+            ptcf.move_entry(a, entry, to)
+            return [e.fx_id for e in a.effects] == [e.fx_id for e in b.effects]
+        return self._chain_edit(entry, fx_id, lambda dev: dev.move_effect(entry, to), check,
+                                f"move {self.effect_name(fx_id)} from entry {entry} to {to}")
+
+    def change_effect(self, entry: int, fx_id: int, to_fx: int) -> bytes:
+        def check(_, b):
+            return entry < len(b.effects) and b.effects[entry].fx_id == to_fx
+        return self._chain_edit(entry, fx_id, lambda dev: dev.change_type(entry, to_fx), check,
+                                f"change {self.effect_name(fx_id)} at entry {entry} into "
+                                f"{self.effect_name(to_fx)}")
 
     def _select(self, slot: int) -> bytes:
         with self._device() as dev:

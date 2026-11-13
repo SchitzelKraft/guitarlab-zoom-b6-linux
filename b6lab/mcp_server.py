@@ -26,7 +26,7 @@ from b6lab.library import list_backups, load_zptc
 from b6lab.device import used_bytes
 from b6lab.patchspec import (EMPTY_NAME, References, SpecError, build, describe, diff_patches,
                              reference_index)
-from b6lab.patchspec import _check_description, _check_name
+from b6lab.patchspec import _check_description, _check_name, effect_load
 from b6lab.pedal_info import decode_global, decode_identity, effects_overview
 from b6lab.pedal_session import SLOTS, PedalError, PedalSession
 
@@ -516,6 +516,39 @@ class _Server:
         return {**out, "summary": f"{info.name} (entry {entry}) {'on' if on else 'off'}; "
                                   f"{len(out['changes'])} unsaved change(s)"}
 
+    def _chain_result(self, edit: bytes, summary: str) -> dict:
+        out = self._live_result(edit)
+        return {**out, "drawing": self._drawing(edit, out["slot"]),
+                "summary": f"{summary}; {len(out['changes'])} unsaved change(s)"}
+
+    def add_effect(self, entry: int, effect: str, expect_at: str | None) -> dict:
+        fx_id, info = self._find(effect)
+        expect = self._find(expect_at)[0] if expect_at else None
+        ref = self.refs.get(fx_id)
+        wide = ref is not None and ref[1] is not None
+        with _tool_errors():
+            edit = self.session.add_effect(entry, fx_id, expect, wide, effect_load(fx_id))
+        return self._chain_result(edit, f"Added {info.name} at entry {entry}")
+
+    def remove_effect(self, entry: int, effect: str) -> dict:
+        fx_id, info = self._find(effect)
+        with _tool_errors():
+            edit = self.session.remove_effect(entry, fx_id)
+        return self._chain_result(edit, f"Removed {info.name} from entry {entry}")
+
+    def move_effect(self, entry: int, effect: str, to: int) -> dict:
+        fx_id, info = self._find(effect)
+        with _tool_errors():
+            edit = self.session.move_effect(entry, fx_id, to)
+        return self._chain_result(edit, f"Moved {info.name} from entry {entry} to {to}")
+
+    def change_effect(self, entry: int, effect: str, to_effect: str) -> dict:
+        fx_id, info = self._find(effect)
+        to_fx, to_info = self._find(to_effect)
+        with _tool_errors():
+            edit = self.session.change_effect(entry, fx_id, to_fx)
+        return self._chain_result(edit, f"Entry {entry}: {info.name} -> {to_info.name}")
+
     def revert_edit(self) -> dict:
         with _tool_errors():
             slot, edit = self.session.revert()
@@ -700,6 +733,46 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                       effect: Annotated[str, Field(description="Effect expected there")],
                       on: bool) -> dict[str, Any]:
         return impl.set_effect_on(entry, effect, on)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Add an effect to the patch the pedal plays now, at chain entry `entry`; nothing is "
+        "stored. expect_at names the effect now at that entry (the new one goes in front of "
+        "it); leave it out to append at the end. Refused on a full chain or over the DSP "
+        "budget; the pedal sets the new effect's knobs; read back. Refused while AUTO SAVE is "
+        "on."))
+    def add_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                   effect: Annotated[str, Field(description="Effect to add, e.g. Hall")],
+                   expect_at: Annotated[str | None, Field(description="Effect now at entry")]
+                   = None) -> dict[str, Any]:
+        return impl.add_effect(entry, effect, expect_at)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Remove the effect at chain entry `entry` (named, as a guard) from the patch the pedal "
+        "plays now; nothing is stored; read back. Refused while AUTO SAVE is on."))
+    def remove_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                      effect: Annotated[str, Field(description="Effect expected there")]
+                      ) -> dict[str, Any]:
+        return impl.remove_effect(entry, effect)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Move the effect at chain entry `entry` (named, as a guard) to entry `to` (its index "
+        "once taken out of the chain) in the patch the pedal plays now; nothing is stored; "
+        "read back. Refused while AUTO SAVE is on."))
+    def move_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                    effect: Annotated[str, Field(description="Effect expected there")],
+                    to: Annotated[int, Field(description="New chain-entry index")]
+                    ) -> dict[str, Any]:
+        return impl.move_effect(entry, effect, to)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Change the effect at chain entry `entry` (named, as a guard) into another effect type "
+        "in the patch the pedal plays now; the pedal sets the knobs; nothing is stored; read "
+        "back. Refused while AUTO SAVE is on."))
+    def change_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                      effect: Annotated[str, Field(description="Effect expected there")],
+                      to_effect: Annotated[str, Field(description="New effect type")]
+                      ) -> dict[str, Any]:
+        return impl.change_effect(entry, effect, to_effect)
 
     @server.tool(annotations=AUDITION, structured_output=True, description=(
         "Drop unsaved changes: the pedal plays the stored patch again. After an audition it "

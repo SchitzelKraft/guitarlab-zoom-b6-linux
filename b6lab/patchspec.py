@@ -356,3 +356,12 @@ def only_text_changed(old: bytes, new: bytes) -> bool:
     if [(e.raw, e.params) for e in a.effects] != [(e.raw, e.params) for e in b.effects]:
         return False
     return ([c for c in a.chunks if c[0] != "TXE1"] == [c for c in b.chunks if c[0] != "TXE1"])
+
+
+def dsp_load(data: bytes) -> float:
+    """Known DSP load units of a patch's effects (unknown loads count 0)."""
+    return _dsp_total(ptcf.parse(data).effects)[0]
+
+
+def effect_load(fx_id: int) -> float | None:
+    return _load(fx_id)

@@ -158,6 +158,7 @@ Tools:
 | `set_knob`, `set_effect_on` | Change the patch the pedal plays now, read back | none (not stored) |
 | `revert_edit` | Play the stored patch again (ends an audition) | scratch slot |
 | `save_edit` | Store what the pedal plays now to an Empty slot | write |
+| `add_effect`, `remove_effect`, `move_effect`, `change_effect` | Change the chain of the patch the pedal plays now, read back | none (not stored) |
 | `rename_patch` | New name and/or description for any non-empty slot, nothing else | write |
 | `draw_patch` | A patch as a text pedalboard (also in `get_patch` and `pedal_status`) | read |
 
@@ -173,7 +174,7 @@ Safety rules:
 - Every write is logged in `backup/writes.jsonl`.
 - `clear_slot` only undoes the server's own installs, and only while the slot still holds
   exactly what it wrote; your own patches are never touched.
-- `audition_patch`, `set_knob` and `set_effect_on` are refused while the pedal's AUTO SAVE is
+- `audition_patch`, `set_knob`, `set_effect_on` and the chain edits are refused while the pedal's AUTO SAVE is
   on (it would store the changes): switch it off on the pedal (SYSTEM > AUTO SAVE). The server
   never changes this setting.
 - Only one program can hold the pedal's MIDI port: close B6 Lab while the server talks to the
@@ -191,7 +192,8 @@ time):
               "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
               "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
               "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
-              "mcp__b6__revert_edit", "mcp__b6__draw_patch"],
+              "mcp__b6__revert_edit", "mcp__b6__draw_patch", "mcp__b6__add_effect",
+              "mcp__b6__remove_effect", "mcp__b6__move_effect", "mcp__b6__change_effect"],
     "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
             "mcp__b6__save_edit", "mcp__b6__rename_patch"]
   }
