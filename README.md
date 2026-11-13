@@ -168,9 +168,9 @@ from any folder as long as Python can find the `b6lab` package (`PYTHONPATH`, se
 
 ### Use it with Claude Code
 
-`.mcp.json` in this folder registers the server as `b6`. Start Claude Code in this folder and
+`.mcp.json` in this folder registers the server as `zoom-b6`. Start Claude Code in this folder and
 approve the project server when asked (or run `claude mcp reset-project-choices` and start
-again if you missed the question). The tools then show up as `mcp__b6__<tool>`. Suggested
+again if you missed the question). The tools then show up as `mcp__zoom-b6__<tool>`. Suggested
 permission rules for `.claude/settings.local.json` are at the end of this section.
 
 ### Use it with Codex
@@ -179,7 +179,7 @@ Add the server to `~/.codex/config.toml` (replace the path with where you cloned
 repository):
 
 ```toml
-[mcp_servers.b6]
+[mcp_servers.zoom-b6]
 command = "/home/you/zoom-b6-lab/.venv/bin/python"
 args = ["-m", "b6lab.mcp_server"]
 env = { PYTHONPATH = "/home/you/zoom-b6-lab" }
@@ -198,7 +198,7 @@ others):
 ```json
 {
   "mcpServers": {
-    "b6": {
+    "zoom-b6": {
       "command": "/home/you/zoom-b6-lab/.venv/bin/python",
       "args": ["-m", "b6lab.mcp_server"],
       "env": {"PYTHONPATH": "/home/you/zoom-b6-lab"}
@@ -256,15 +256,35 @@ allowed, writes to pedal memory asked every time):
 ```json
 {
   "permissions": {
-    "allow": ["mcp__b6__list_patches", "mcp__b6__get_patch", "mcp__b6__current_patch",
-              "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
-              "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
-              "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
-              "mcp__b6__revert_edit", "mcp__b6__draw_patch", "mcp__b6__add_effect",
-              "mcp__b6__remove_effect", "mcp__b6__move_effect", "mcp__b6__change_effect",
-              "mcp__b6__search_patches", "mcp__b6__compare_patches"],
-    "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
-            "mcp__b6__save_edit", "mcp__b6__rename_patch"]
+    "allow": [
+      "mcp__zoom-b6__list_patches",
+      "mcp__zoom-b6__get_patch",
+      "mcp__zoom-b6__current_patch",
+      "mcp__zoom-b6__list_effects",
+      "mcp__zoom-b6__effect_info",
+      "mcp__zoom-b6__validate_patch",
+      "mcp__zoom-b6__build_patch",
+      "mcp__zoom-b6__pedal_info",
+      "mcp__zoom-b6__pedal_status",
+      "mcp__zoom-b6__audition_patch",
+      "mcp__zoom-b6__set_knob",
+      "mcp__zoom-b6__set_effect_on",
+      "mcp__zoom-b6__revert_edit",
+      "mcp__zoom-b6__draw_patch",
+      "mcp__zoom-b6__add_effect",
+      "mcp__zoom-b6__remove_effect",
+      "mcp__zoom-b6__move_effect",
+      "mcp__zoom-b6__change_effect",
+      "mcp__zoom-b6__search_patches",
+      "mcp__zoom-b6__compare_patches"
+    ],
+    "ask": [
+      "mcp__zoom-b6__install_patch",
+      "mcp__zoom-b6__clear_slot",
+      "mcp__zoom-b6__backup_pedal",
+      "mcp__zoom-b6__save_edit",
+      "mcp__zoom-b6__rename_patch"
+    ]
   }
 }
 ```

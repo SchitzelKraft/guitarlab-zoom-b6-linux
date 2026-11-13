@@ -644,7 +644,7 @@ def build_server(session: PedalSession, catalog: dict | None = None,
     catalog, `default_references(session.root)` and the effect models, loaded on first use."""
     impl = _Server(session, catalog, refs, models)
     session.effect_name = impl.effect_name  # effect names in refusals, from the same catalog
-    server = MCPServer(name="b6", instructions=INSTRUCTIONS)
+    server = MCPServer(name="zoom-b6", instructions=INSTRUCTIONS)
 
     @server.tool(annotations=READ_ONLY, structured_output=True, description=(
         "List all 240 patch slots (1-240) with name and description. Answers from the newest "
