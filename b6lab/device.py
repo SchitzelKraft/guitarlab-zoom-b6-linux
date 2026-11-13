@@ -98,10 +98,12 @@ def select_written(dev, slot, data):
 
 def save_slot(dev, slot: int, new_data: bytes, loaded_data: Optional[bytes],
               backup_dir: Path, confirm_conflict: Callable[[], bool],
-              store_edit: bool = False) -> SaveResult:
+              store_edit: bool = False, select: bool = True) -> SaveResult:
     """Never raises: every failure is reported in the SaveResult.
     `store_edit`: the editor's SAVE, which (like Guitar Lab) sends Patch Save (`64 0D`) after
-    the backup and before the write."""
+    the backup and before the write.
+    `select`: after a verified write, select the slot on the pedal (default). False leaves the
+    pedal on whatever it had selected."""
     backup_dir = Path(backup_dir)
     backup = None
     problem = validate_patch(new_data)
@@ -139,6 +141,8 @@ def save_slot(dev, slot: int, new_data: bytes, loaded_data: Optional[bytes],
         return SaveResult(False, f"verify failed: read-back differs from what was written "
                                  f"(backup kept at {backup})", backup)
 
+    if not select:
+        return SaveResult(True, "saved and verified", backup)
     try:
         select_written(dev, slot, new_data)
     except Exception as e:
