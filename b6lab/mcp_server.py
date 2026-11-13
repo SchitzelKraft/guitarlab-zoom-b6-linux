@@ -546,7 +546,9 @@ class _Server:
         fx_id, info = self._find(effect)
         to_fx, to_info = self._find(to_effect)
         with _tool_errors():
-            edit = self.session.change_effect(entry, fx_id, to_fx)
+            ref = self.refs.get(to_fx)
+            edit = self.session.change_effect(entry, fx_id, to_fx,
+                                              ref is not None and ref[1] is not None)
         return self._chain_result(edit, f"Entry {entry}: {info.name} -> {to_info.name}")
 
     def revert_edit(self) -> dict:

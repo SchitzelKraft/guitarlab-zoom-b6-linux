@@ -32,6 +32,7 @@ from b6lab.patchspec import (BUDGET, EMPTY_NAME, chain_effect_ids, dsp_load, is_
 from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
+TAIL = 1  # fx_id of the second half of a double-width effect
 LIVE_SETTLE = 0.25  # seconds before reading back a live knob or on/off change
 SELECT_SETTLE = 0.5  # seconds after selecting a slot before reading the edit buffer
 AUTO_SAVE_TEXT = "switch AUTO SAVE off on the pedal (SYSTEM > AUTO SAVE)"
@@ -346,11 +347,11 @@ class PedalSession:
             dev.insert_effect(entry)
             dev.change_type(entry, fx_id)
 
-        def check(_, b):
-            ok = entry < len(b.effects) and b.effects[entry].fx_id == fx_id
-            if ok and wide:
-                ok = entry + 1 < len(b.effects) and b.effects[entry + 1].is_tail
-            return ok
+        def check(a, b):
+            # the chain grew by the new effect and everything else is still there, in order
+            new = [fx_id] + ([TAIL] if wide else [])
+            want = [e.fx_id for e in a.effects[:entry]] + new + [e.fx_id for e in a.effects[entry:]]
+            return [e.fx_id for e in b.effects] == want
 
         return self._chain_edit(entry, None, send, check,
                                 f"add {self.effect_name(fx_id)} at entry {entry} (no room "
@@ -364,15 +365,30 @@ class PedalSession:
                                 f"remove {self.effect_name(fx_id)} at entry {entry}")
 
     def move_effect(self, entry: int, fx_id: int, to: int) -> bytes:
+        def before(p, _edit):
+            width = 2 if entry + 1 < len(p.effects) and p.effects[entry + 1].is_tail else 1
+            rest = p.effects[:entry] + p.effects[entry + width:]
+            if not 0 <= to <= len(rest) or (to < len(rest) and rest[to].is_tail):
+                raise PedalError(f"position {to} is not a place in the chain for "
+                                 f"{self.effect_name(fx_id)} (0 to {len(rest)}, not inside a "
+                                 "double-width effect)")
+
         def check(a, b):
             ptcf.move_entry(a, entry, to)
             return [e.fx_id for e in a.effects] == [e.fx_id for e in b.effects]
         return self._chain_edit(entry, fx_id, lambda dev: dev.move_effect(entry, to), check,
-                                f"move {self.effect_name(fx_id)} from entry {entry} to {to}")
+                                f"move {self.effect_name(fx_id)} from entry {entry} to {to}",
+                                before)
 
-    def change_effect(self, entry: int, fx_id: int, to_fx: int) -> bytes:
-        def check(_, b):
-            return entry < len(b.effects) and b.effects[entry].fx_id == to_fx
+    def change_effect(self, entry: int, fx_id: int, to_fx: int, wide: bool = False) -> bytes:
+        def check(a, b):
+            # the effect at `entry` changed type (with its own second half when double width)
+            # and every other effect is still there, in order
+            old_w = 2 if entry + 1 < len(a.effects) and a.effects[entry + 1].is_tail else 1
+            new = [to_fx] + ([TAIL] if wide else [])
+            want = ([e.fx_id for e in a.effects[:entry]] + new
+                    + [e.fx_id for e in a.effects[entry + old_w:]])
+            return [e.fx_id for e in b.effects] == want
         return self._chain_edit(entry, fx_id, lambda dev: dev.change_type(entry, to_fx), check,
                                 f"change {self.effect_name(fx_id)} at entry {entry} into "
                                 f"{self.effect_name(to_fx)}")

@@ -183,7 +183,12 @@ repository):
 command = "/home/you/zoom-b6-lab/.venv/bin/python"
 args = ["-m", "b6lab.mcp_server"]
 env = { PYTHONPATH = "/home/you/zoom-b6-lab" }
+tool_timeout_sec = 180
 ```
+
+`tool_timeout_sec` matters: the first tool that needs the pedal makes a full backup, which takes
+about a minute (Codex's default limit is 60 s). Give other clients a similar timeout when they
+have one.
 
 Start Codex; the B6 tools are available in every session. Codex asks for approval according to
 its own settings; the tool descriptions mark which tools write to the pedal.
