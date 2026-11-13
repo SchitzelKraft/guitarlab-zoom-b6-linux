@@ -35,6 +35,7 @@ class FakeB6:
         # global data reply (64 09) as the B6 sends it: tempo 120, calibration 440 Hz, AUTO SAVE
         # off (byte 12)
         self.global_reply = bytes.fromhex("52 00 6e 64 09 78 00 00 01 05 00 00 00 00 00 00 00")
+        self.auto_save = False     # like the pedal's AUTO SAVE: live edits are stored at once
 
     def _check_timeout(self):
         if self.timeout_next:
@@ -51,8 +52,15 @@ class FakeB6:
 
     def global_info(self):
         self._check_timeout()
-        r = self.global_reply
-        return {"tempo": r[5] | r[6] << 7, "auto_save": bool(r[12]), "raw": r}
+        r = bytearray(self.global_reply)
+        if self.auto_save and len(r) > 12:
+            r[12] = 1   # AUTO SAVE byte, verified on the B6 2026-11-13
+        r = bytes(r)
+        return {"tempo": r[5] | r[6] << 7, "auto_save": len(r) > 12 and bool(r[12]), "raw": r}
+
+    def _auto_store(self):
+        if self.auto_save:
+            self.slots[self.selected] = bytes(self.edit).ljust(SLOT_SIZE, b"\0")
 
     def product_info(self):
         return {"visible_width": 5, "raw": bytes.fromhex("52 00 6e 64 10 70 01 02 05 03")}
@@ -114,6 +122,7 @@ class FakeB6:
         if module < len(p.effects) and not p.effects[module].is_tail:
             ptcf.set_param(p, module, index, value)
             self.edit = ptcf.encode(p).ljust(SLOT_SIZE, b"\0")
+            self._auto_store()
 
     def tuner(self, on):
         self._check_timeout()
@@ -230,6 +239,7 @@ class FakeB6:
             e = p.effects[position]
             ptcf.set_on(p, e.slot, not e.on)
             self.edit = ptcf.encode(p).ljust(SLOT_SIZE, b"\0")
+            self._auto_store()
 
     def close(self):
         self.closed = True

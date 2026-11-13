@@ -26,9 +26,15 @@ from b6lab import ptcf
 from b6lab.device import save_slot, used_bytes, validate_patch
 from b6lab.library import backup_all, list_backups
 from b6lab.midi import B6, DeviceBusy, NotConnected
+from b6lab import live
 from b6lab.patchspec import EMPTY_NAME, chain_effect_ids, is_empty_patch
+from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
+LIVE_SETTLE = 0.25  # seconds before reading back a live knob or on/off change
+SELECT_SETTLE = 0.5  # seconds after selecting a slot before reading the edit buffer
+AUTO_SAVE_TEXT = "switch AUTO SAVE off on the pedal (SYSTEM > AUTO SAVE)"
+SCRATCH_TRIES = 3   # Empty slots tried, highest first, when picking the audition slot
 
 
 class PedalError(RuntimeError):
@@ -88,6 +94,8 @@ class PedalSession:
         self.effect_name = effect_name or _catalog_name  # fx_id -> name, for messages
         self._full_backup_done = False
         self._own = {}  # slot (1-240) -> (name, description, empty) written by this session
+        self._scratch: Optional[int] = None         # slot (1-240) holding the audition patch
+        self._audition_from: Optional[int] = None   # slot selected before the audition
 
     # --- device access -------------------------------------------------------------------
 
@@ -164,6 +172,29 @@ class PedalSession:
         return {"backup_file": str(res.backup_file), "message": res.message,
                 "full_backup": full_backup}
 
+    def _require_auto_save_off(self, dev) -> None:
+        """Live tools only run with AUTO SAVE known to be off; read on every call."""
+        try:
+            on = auto_save_on(bytes(dev.global_info()["raw"]))
+        except Exception as e:  # noqa: BLE001 - unreadable counts as "maybe on"
+            raise PedalError(f"AUTO SAVE could not be read ({e}); {AUTO_SAVE_TEXT}") from e
+        if on is not False:
+            state = "on" if on else "unknown"
+            raise PedalError(f"AUTO SAVE is {state}, so the pedal would store live edits; "
+                             f"{AUTO_SAVE_TEXT}")
+
+    def _guard_effect(self, edit: bytes, entry: int, fx_id: int):
+        p = ptcf.parse(edit)
+        if not 0 <= entry < len(p.effects) or p.effects[entry].is_tail:
+            raise PedalError(f"chain entry {entry} holds no effect of its own in the patch "
+                             "the pedal is playing")
+        found = p.effects[entry].fx_id
+        if found != fx_id:
+            raise PedalError(f"chain entry {entry} holds {self.effect_name(found)}, not "
+                             f"{self.effect_name(fx_id)}: the pedal is on another patch or "
+                             "the chain changed; read pedal_status first")
+        return p
+
     # --- public API ----------------------------------------------------------------------
 
     def read_slot(self, slot: int) -> bytes:
@@ -202,6 +233,106 @@ class PedalSession:
             read("product_info", dev.product_info)
             read("patch_capabilities", dev.patch_capabilities)
         return out
+
+    def read_edit(self) -> bytes:
+        with self._device() as dev:
+            return bytes(dev.read_edit())
+
+    def status(self) -> dict:
+        with self._device() as dev:
+            slot = dev.selected_slot()
+            stored, edit = bytes(dev.read_slot(slot)), bytes(dev.read_edit())
+            try:
+                auto = auto_save_on(bytes(dev.global_info()["raw"]))
+            except Exception:  # noqa: BLE001 - reported as unknown
+                auto = None
+        return {"slot": slot + 1, "stored": stored, "edit": edit, "auto_save": auto,
+                "scratch": self._scratch, "audition_from": self._audition_from}
+
+    def set_param(self, entry: int, fx_id: int, index: int, raw: int) -> bytes:
+        with self._device() as dev:
+            self._require_auto_save_off(dev)
+            p = self._guard_effect(bytes(dev.read_edit()), entry, fx_id)
+            live.send_param(dev, p, entry, index, raw)
+            time.sleep(LIVE_SETTLE)
+            edit = bytes(dev.read_edit())
+        got = ptcf.parse(edit).effects[entry].params[index]
+        if got != raw:
+            raise PedalError(f"the pedal did not take the value: knob {index + 1} of entry "
+                             f"{entry} reads {got}, sent {raw}")
+        return edit
+
+    def set_effect_on(self, entry: int, fx_id: int, on: bool) -> bytes:
+        with self._device() as dev:
+            self._require_auto_save_off(dev)
+            self._guard_effect(bytes(dev.read_edit()), entry, fx_id)
+            try:
+                live.set_effect_on(dev, entry, on, None)
+            except live.LiveError as e:
+                raise PedalError(str(e)) from e
+            time.sleep(LIVE_SETTLE)
+            edit = bytes(dev.read_edit())
+        if ptcf.parse(edit).effects[entry].on != bool(on):
+            raise PedalError(f"the pedal did not switch entry {entry} {'on' if on else 'off'}")
+        return edit
+
+    def _select(self, slot: int) -> bytes:
+        with self._device() as dev:
+            dev.select_slot(slot - 1)
+            time.sleep(SELECT_SETTLE)
+            return bytes(dev.read_edit())
+
+    def _drop_scratch(self) -> None:
+        """Back to the slot selected before the audition, then empty the scratch slot."""
+        if self._scratch is None:
+            return
+        self._select(self._audition_from)
+        self.clear(self._scratch)
+        self._scratch = None
+
+    def audition(self, data: bytes) -> dict:
+        """Play `data` on the pedal from a scratch Empty slot (Phase 0 decision: `28` writes
+        the selected slot's memory, so it is not used). A new audition replaces the last."""
+        with self._device() as dev:
+            self._require_auto_save_off(dev)
+            before = dev.selected_slot() + 1
+        if self._scratch is None:
+            self._audition_from = before
+            candidates = [p["slot"] for p in reversed(self.list_patches(False)["patches"])
+                          if p["empty"] and p["slot"] != before]
+        else:
+            candidates = [self._scratch]
+            self._drop_scratch()
+        last = None
+        for slot in candidates[:SCRATCH_TRIES]:
+            try:
+                out = self.install(data, slot, select=True)
+            except PedalError as e:
+                if "not an Empty slot" not in str(e) and "named Empty but" not in str(e):
+                    raise
+                last = e
+                continue
+            self._scratch = slot
+            time.sleep(SELECT_SETTLE)
+            return {**out, "edit": self.read_edit(), "audition_from": self._audition_from}
+        raise PedalError(f"no Empty slot found for the audition ({last})" if last
+                         else "no Empty slot left for the audition")
+
+    def revert(self) -> tuple:
+        """The pedal plays the stored patch again: back from an audition (scratch slot
+        cleared), or the selected slot re-selected (drops live edits, verified 2026-11-13)."""
+        if self._scratch is not None:
+            slot = self._audition_from
+            self._drop_scratch()
+            self._audition_from = None
+        else:
+            with self._device() as dev:
+                slot = dev.selected_slot() + 1
+        edit = self._select(slot)
+        stored = self.read_slot(slot)
+        if used_bytes(edit) != used_bytes(stored):
+            raise PedalError(f"slot {slot} re-selected but the pedal still plays an edited patch")
+        return slot, edit
 
     def backup(self) -> str:
         with self._device() as dev:
