@@ -1,6 +1,7 @@
 # B6 Lab, B6 Remote and the B6 MCP server
 
-** Yes, this was vibe coded. It was tested extensively on my Zoom B6. Do whatever you want with it, if you dare. ** 
+** Yes, this is vibe coded. It has been tested extensively on my Zoom B6. Do 
+whatever you want with it, if you dare. ** 
 
 Three free tools for the Zoom B6 bass multi-effects pedal, made because Zoom's own editor
 (Guitar Lab) does not run on Linux and its phone app (Handy Guitar Lab) is iOS only:
