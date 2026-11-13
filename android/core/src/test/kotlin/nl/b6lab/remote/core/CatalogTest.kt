@@ -34,7 +34,7 @@ class CatalogTest {
     @Test
     fun formatMatchesPython() {
         val cases = Json.parseToJsonElement(res("format.json")).jsonArray.map { it.jsonObject }
-        assertEquals(200, cases.size)
+        assertTrue(cases.size > 200)   // 200 random cases plus both sides of every tempo limit
         for (c in cases) {
             val id = c["fx_id"]!!.jsonPrimitive.int
             val i = c["index"]!!.jsonPrimitive.int
@@ -42,6 +42,20 @@ class CatalogTest {
             assertEquals("fx $id param $i value $v", c["text"]!!.jsonPrimitive.content,
                 catalog.effects[id]!!.params[i].format(v))
         }
+    }
+
+    @Test
+    fun tempoSyncedKnobsShowThePedalsNumbers() {
+        // verified on the pedal: Phaser Rate raw 11 shows 12, TapeEcho Time raw 299 shows 300
+        fun knob(effect: String, name: String) =
+            catalog.effects.values.first { it.name == effect }.params.first { it.name == name }
+        val rate = knob("Phaser", "Rate")
+        assertEquals(49, rate.through)
+        assertEquals("12", rate.display(11))
+        assertEquals("50", rate.display(49))
+        assertEquals("raw 50", rate.display(50))
+        assertEquals("300", knob("TapeEcho", "Time").display(299))
+        assertNull(knob("Phaser", "Depth").through)
     }
 
     @Test

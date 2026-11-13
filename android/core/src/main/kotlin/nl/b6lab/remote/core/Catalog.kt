@@ -19,13 +19,17 @@ data class ParamInfo(
     val displayStep: String?,
     val precision: Int,
     val labels: List<String>?,
+    /** Tempo-synced knobs: `min + step * value` up to here; above it note values, shown raw. */
+    val through: Int? = null,
 ) {
-    /** The value as Guitar Lab shows it: a label, `min + step * value` with `precision` decimals, or `raw n`. */
+    /** The value as Guitar Lab shows it: a label, `min + step * value` with `precision` decimals, or `raw n`
+     *  (no display info, or a tempo-synced note value above [through]). */
     fun format(value: Int): String {
         labels?.let { if (value in it.indices) return it[value] }
         val min = displayMin
         val step = displayStep
         if (min == null || step == null) return "raw $value"
+        if (through != null && value > through) return "raw $value"
         val result = BigDecimal(min).add(BigDecimal(step).multiply(BigDecimal(value)))
         return result.setScale(precision, RoundingMode.HALF_EVEN).toPlainString()
     }
@@ -102,6 +106,7 @@ class Catalog(val effects: Map<Int, EffectInfo>) {
                         displayStep = str(q, "display_step"),
                         precision = q["precision"]!!.jsonPrimitive.int,
                         labels = q["labels"]?.takeIf { it !is JsonNull }?.jsonArray?.map { it.jsonPrimitive.content },
+                        through = q["through"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.int,
                     )
                 }
                 map[id] = EffectInfo(

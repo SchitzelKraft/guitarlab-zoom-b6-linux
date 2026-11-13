@@ -135,8 +135,14 @@ def format_fixture():
             for v in sorted({0, top, rng.randint(0, max(top, 1))}):
                 cases.append((fx_id, i, v))
     rng.shuffle(cases)
+    cases = cases[:200]
+    # tempo-synced knobs: both sides of display_through (display = raw + 1, note values raw)
+    for fx_id, info in sorted(_catalog().items()):
+        for i, prm in enumerate(info.params):
+            if prm.display_through is not None:
+                cases += [(fx_id, i, v) for v in (0, prm.display_through, prm.display_through + 1)]
     out = [{"fx_id": f, "index": i, "value": v, "text": _catalog()[f].params[i].format_value(v)}
-           for f, i, v in cases[:200]]
+           for f, i, v in cases]
     write_json(FIXTURES, "format.json", out)
 
 
@@ -219,7 +225,8 @@ def catalog_json():
             "svg": f"generated/svg/{name}.svg" if name else None,
             "params": [{"name": q.name, "raw_max": q.raw_max, "display_min": q.display_min,
                         "display_step": q.display_step, "precision": q.display_precision,
-                        "labels": q.display_labels} for q in info.params]}
+                        "labels": q.display_labels, "through": q.display_through}
+                       for q in info.params]}
     return out, names, svg_dir
 
 

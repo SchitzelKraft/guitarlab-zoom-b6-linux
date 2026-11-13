@@ -55,7 +55,7 @@ B6 Remote is a separate Android app (an APK you install on the phone). It edits 
 
 ### Download and install
 
-Download `B6Remote-1.2.apk` from the [Releases page](https://github.com/SchitzelKraft/zoom-b6-lab/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
+Download `B6Remote-1.3.apk` from the [Releases page](https://github.com/SchitzelKraft/zoom-b6-lab/releases). On your phone, allow installing apps from this source when Android asks, then open the APK and install it.
 
 ### Requirements
 
