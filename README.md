@@ -158,6 +158,8 @@ Tools:
 | `set_knob`, `set_effect_on` | Change the patch the pedal plays now, read back | none (not stored) |
 | `revert_edit` | Play the stored patch again (ends an audition) | scratch slot |
 | `save_edit` | Store what the pedal plays now to an Empty slot | write |
+| `rename_patch` | New name and/or description for any non-empty slot, nothing else | write |
+| `draw_patch` | A patch as a text pedalboard (also in `get_patch` and `pedal_status`) | read |
 
 Safety rules:
 
@@ -165,6 +167,9 @@ Safety rules:
   to the slot only when asked (`select`).
 - Every write first backs up the slot to `backup/overwritten/`; the first write of each server
   session also makes a full backup of all 240 slots.
+- `rename_patch` is the only tool that writes a slot that is not Empty: it changes the name
+  and description only (checked byte for byte), needs the slot's current name, and is refused
+  while that slot plays with unsaved changes.
 - Every write is logged in `backup/writes.jsonl`.
 - `clear_slot` only undoes the server's own installs, and only while the slot still holds
   exactly what it wrote; your own patches are never touched.
@@ -186,9 +191,9 @@ time):
               "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
               "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
               "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
-              "mcp__b6__revert_edit"],
+              "mcp__b6__revert_edit", "mcp__b6__draw_patch"],
     "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
-            "mcp__b6__save_edit"]
+            "mcp__b6__save_edit", "mcp__b6__rename_patch"]
   }
 }
 ```

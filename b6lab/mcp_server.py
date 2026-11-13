@@ -40,7 +40,8 @@ Tools for a Zoom B6 bass multi-effects pedal connected over USB. Slots are numbe
 as on the pedal. Knob values are in display units as the pedal shows them (numbers or labels
 such as "8 STG"); a knob without known display units takes {"raw": n}.
 Safety rules: patches are only installed to Empty slots (named Empty with no effects in the
-chain) and the name Empty is refused; a full backup is made before the first write (install
+chain) and the name Empty is refused; rename_patch changes only the name and description of a
+non-empty slot (checked byte for byte) and needs its current name; a full backup is made before the first write (install
 or clear) of the session and a per-slot backup before every write; every write is logged
 in backup/writes.jsonl; clear_slot only undoes this server's own unchanged installs. Only one
 program can hold the pedal's MIDI port: if a tool says the port is busy, ask the user to close
@@ -543,6 +544,26 @@ class _Server:
                 "summary": f"Saved what the pedal plays as {patch['name']!r} in slot {slot}"
                            f"{note}"}
 
+    def rename_patch(self, slot: int, expect_name: str, name: str | None,
+                     description: str | None) -> dict:
+        if name is None and description is None:
+            raise ToolError("rename_patch needs a new name or description")
+        with _tool_errors():
+            warnings: list[str] = []
+            if name is not None:
+                _check_name(name)
+            if description is not None:
+                _check_description(description, warnings)
+            out = self.session.rename(slot, expect_name, name, description)
+            data = self.session.read_slot(slot)
+            patch = describe(data, self.catalog, slot=slot)
+        what = " and ".join(w for w, v in (("name", name), ("description", description))
+                            if v is not None)
+        return {**out, "warnings": warnings, "patch": patch,
+                "drawing": self._drawing(data, slot),
+                "summary": f"Slot {slot}: {what} changed ({out['old_name']!r} -> "
+                           f"{out['name']!r})"}
+
     def backup_pedal(self) -> dict:
         with _tool_errors():
             path = self.session.backup()
@@ -695,6 +716,18 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                   description: Annotated[str | None, Field(description="New description")]
                   = None) -> dict[str, Any]:
         return impl.save_edit(slot, name, description)
+
+    @server.tool(annotations=DESTRUCTIVE, structured_output=True, description=(
+        "Give a patch on the pedal (any non-empty slot 1-240, factory patches included) a new "
+        "name and/or description; nothing else changes (checked byte for byte). expect_name is "
+        "the slot's current name (guards against a wrong slot). Refused while that slot plays "
+        "with unsaved changes. Backed up, logged and read back like install_patch."))
+    def rename_patch(slot: Slot,
+                     expect_name: Annotated[str, Field(description="The slot's current name")],
+                     name: Annotated[str | None, Field(description="New name, 1-10 ASCII")] = None,
+                     description: Annotated[str | None, Field(description="New description")]
+                     = None) -> dict[str, Any]:
+        return impl.rename_patch(slot, expect_name, name, description)
 
     @server.tool(annotations=BACKUP, structured_output=True, description=(
         "Read all 240 slots (1-240) of the pedal into a new full backup folder under backup/ "

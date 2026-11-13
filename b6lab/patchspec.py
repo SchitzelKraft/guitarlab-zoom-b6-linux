@@ -340,3 +340,19 @@ def diff_patches(stored: dict, edit: dict) -> list[str]:
             if new != old:
                 out.append(f"{where} {knob}: {_show(old)} -> {_show(new)}")
     return out
+
+
+def only_text_changed(old: bytes, new: bytes) -> bool:
+    """True when `new` differs from `old` at most in the patch name and the description (TXE1):
+    header fields, the effect ID list, every effect entry and every other chunk (EDTB, PRM2 with
+    the level, TXJ1, ...) are identical. The guard of rename_patch (MCP v3)."""
+    try:
+        a, b = ptcf.parse(old), ptcf.parse(new)
+    except Exception:  # noqa: BLE001 - unparseable is "not only text"
+        return False
+    if (a.version, a.slots, a.effect_ids, a.header_unknown) != (
+            b.version, b.slots, b.effect_ids, b.header_unknown):
+        return False
+    if [(e.raw, e.params) for e in a.effects] != [(e.raw, e.params) for e in b.effects]:
+        return False
+    return ([c for c in a.chunks if c[0] != "TXE1"] == [c for c in b.chunks if c[0] != "TXE1"])

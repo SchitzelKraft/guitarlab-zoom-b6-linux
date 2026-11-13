@@ -27,7 +27,7 @@ from b6lab.device import save_slot, used_bytes, validate_patch
 from b6lab.library import backup_all, list_backups
 from b6lab.midi import B6, DeviceBusy, NotConnected
 from b6lab import live
-from b6lab.patchspec import EMPTY_NAME, chain_effect_ids, is_empty_patch
+from b6lab.patchspec import EMPTY_NAME, chain_effect_ids, is_empty_patch, only_text_changed
 from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
@@ -73,6 +73,14 @@ def _catalog_name(fx_id: int) -> str:
         _CATALOG = effects.load()
     info = _CATALOG.get(fx_id)
     return info.name if info is not None else f"0x{fx_id:08X}"
+
+
+def _edited(stored: bytes, edit: bytes) -> bool:
+    """Unsaved changes: level, name or any effect's type, on/off or knobs differ (the edit
+    marker byte the pedal leaves after a live change is not one of these, Phase 0)."""
+    a, b = ptcf.parse(stored), ptcf.parse(edit)
+    return ((a.level, a.name, [(e.fx_id, e.on, e.params) for e in a.effects])
+            != (b.level, b.name, [(e.fx_id, e.on, e.params) for e in b.effects]))
 
 
 def _check_slot(slot) -> int:
@@ -421,6 +429,41 @@ class PedalSession:
             out = self._write(dev, "install", slot, data, live, select)
         return {"slot": slot, "name": name, "backup_file": out["backup_file"],
                 "full_backup": out["full_backup"], "message": out["message"]}
+
+    def rename(self, slot: int, expect_name: str, name: Optional[str],
+               description: Optional[str]) -> dict:
+        """New name and/or description for any non-empty slot (v3; the user's own and factory
+        patches included), nothing else: the new bytes must pass `only_text_changed`. Name and
+        description are validated by the caller."""
+        _check_slot(slot)
+        with self._device() as dev:
+            live = bytes(dev.read_slot(slot - 1))
+            old = ptcf.parse(live)
+            if is_empty_patch(live) or old.name.strip() == EMPTY_NAME:
+                raise PedalError(f"slot {slot} is an Empty slot; rename_patch only renames "
+                                 "patches")
+            if old.name.strip() != expect_name.strip():
+                raise PedalError(f"slot {slot} holds {old.name.strip()!r}, not "
+                                 f"{expect_name.strip()!r}; nothing written")
+            selected = dev.selected_slot() + 1 == slot
+            if selected and _edited(live, bytes(dev.read_edit())):
+                raise PedalError(f"slot {slot} is playing with unsaved changes; save them "
+                                 "(save_edit) or drop them (revert_edit) first")
+            p = ptcf.parse(used_bytes(live))
+            if name is not None:
+                ptcf.set_name(p, name)
+            if description is not None:
+                ptcf.set_comment(p, description)
+                if p.comment != description:
+                    raise PedalError("the description does not fit in the patch; nothing written")
+            new = ptcf.encode(p)
+            if not only_text_changed(live, new):
+                raise PedalError(f"slot {slot}: the renamed patch would differ in more than "
+                                 "name and description; nothing written")
+            out = self._write(dev, "rename", slot, new, live, selected)
+        return {"slot": slot, "old_name": old.name.strip(), "name": p.name.strip(),
+                "backup_file": out["backup_file"], "full_backup": out["full_backup"],
+                "message": out["message"]}
 
     def clear(self, slot: int) -> dict:
         _check_slot(slot)
