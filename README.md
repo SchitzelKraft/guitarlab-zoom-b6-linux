@@ -152,6 +152,12 @@ Tools:
 | `install_patch` | Write a `.zptc` file or a spec to an Empty slot | write |
 | `clear_slot` | Undo one of the server's own installs | write |
 | `backup_pedal` | Full backup of all 240 slots to `backup/` | read |
+| `pedal_info` | Everything the pedal reports: firmware, settings, effect memory, installed effects | read |
+| `pedal_status` | What the pedal plays now, AUTO SAVE, unsaved changes | read |
+| `audition_patch` | Play a `.zptc` file or a spec from a scratch Empty slot | scratch slot |
+| `set_knob`, `set_effect_on` | Change the patch the pedal plays now, read back | none (not stored) |
+| `revert_edit` | Play the stored patch again (ends an audition) | scratch slot |
+| `save_edit` | Store what the pedal plays now to an Empty slot | write |
 
 Safety rules:
 
@@ -162,20 +168,27 @@ Safety rules:
 - Every write is logged in `backup/writes.jsonl`.
 - `clear_slot` only undoes the server's own installs, and only while the slot still holds
   exactly what it wrote; your own patches are never touched.
+- `audition_patch`, `set_knob` and `set_effect_on` are refused while the pedal's AUTO SAVE is
+  on (it would store the changes): switch it off on the pedal (SYSTEM > AUTO SAVE). The server
+  never changes this setting.
 - Only one program can hold the pedal's MIDI port: close B6 Lab while the server talks to the
   pedal. The server opens the port per tool call and never takes it from another program.
 
 Enable it: `.mcp.json` in this folder registers the server as `b6`; Claude Code picks it up
 when started here (approve the project server when asked). Suggested permission rules for
-`.claude/settings.local.json` (read and offline tools allowed, pedal writes asked every time):
+`.claude/settings.local.json` (read, offline and live tools allowed, memory writes asked every
+time):
 
 ```json
 {
   "permissions": {
     "allow": ["mcp__b6__list_patches", "mcp__b6__get_patch", "mcp__b6__current_patch",
               "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
-              "mcp__b6__build_patch"],
-    "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal"]
+              "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
+              "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
+              "mcp__b6__revert_edit"],
+    "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
+            "mcp__b6__save_edit"]
   }
 }
 ```

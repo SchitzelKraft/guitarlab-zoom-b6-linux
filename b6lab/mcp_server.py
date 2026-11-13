@@ -21,10 +21,12 @@ from pydantic import Field
 
 from b6lab import effects, ptcf
 from b6lab.effect_models import load_models
-from b6lab.knobs import KnobError, display_value
+from b6lab.knobs import KnobError, display_value, raw_value
 from b6lab.library import list_backups, load_zptc
 from b6lab.device import used_bytes
-from b6lab.patchspec import EMPTY_NAME, References, SpecError, build, describe, reference_index
+from b6lab.patchspec import (EMPTY_NAME, References, SpecError, build, describe, diff_patches,
+                             reference_index)
+from b6lab.patchspec import _check_description, _check_name
 from b6lab.pedal_info import decode_global, decode_identity, effects_overview
 from b6lab.pedal_session import SLOTS, PedalError, PedalSession
 
@@ -42,7 +44,11 @@ chain) and the name Empty is refused; a full backup is made before the first wri
 or clear) of the session and a per-slot backup before every write; every write is logged
 in backup/writes.jsonl; clear_slot only undoes this server's own unchanged installs. Only one
 program can hold the pedal's MIDI port: if a tool says the port is busy, ask the user to close
-B6 Lab. Claude cannot hear the pedal; the user judges the sound."""
+B6 Lab. Claude cannot hear the pedal; the user judges the sound.
+Tuning: audition_patch plays a patch from a scratch Empty slot; set_knob and set_effect_on
+change only what the pedal plays now (nothing is stored) and name the effect they expect at
+the chain entry; all three are refused while the pedal's AUTO SAVE is on. Keep the result with
+save_edit (to an Empty slot), drop it with revert_edit; pedal_status shows what changed."""
 
 SLOT_TEXT = "Slot number 1-240, as shown on the pedal."
 
@@ -65,6 +71,9 @@ DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idemp
                               open_world_hint=False)
 BACKUP = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
 FILE_WRITE = BACKUP  # writes a local file, never the pedal (build_patch)
+# changes what the pedal plays, never stored (audition writes only its scratch Empty slot)
+LIVE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                       open_world_hint=False)
 MISSING_EFFECTS = ("B6 Lab data files missing: pedal-files/effects.json; "
                    "see README Data files")
 
@@ -249,6 +258,30 @@ class _Server:
         path = Path(file).expanduser()
         return path if path.is_absolute() else self.session.root / path
 
+    def _source(self, tool: str, file: str | None, spec: dict | None):
+        """A patch from exactly one of a .zptc file or a spec (built and saved to created/)."""
+        if (file is None) == (spec is None):
+            raise ToolError(f"{tool} needs exactly one of 'file' (a .zptc path) or "
+                            "'spec' (a patch spec)")
+        if spec is not None:
+            data, warnings = self._build(spec)
+            return data, warnings, self._save(data, ptcf.parse(data).name)
+        path = self._file(file)
+        return load_zptc(path), [], path
+
+    def _knob(self, info, knob: str):
+        wanted = knob.strip().lower()
+        for i, param in enumerate(info.params):
+            if param.name.lower() == wanted:
+                return i, param
+        raise ToolError(f"{info.name} has no knob {knob!r}; its knobs: "
+                        f"{', '.join(p.name for p in info.params)}")
+
+    def _live_result(self, edit: bytes) -> dict:
+        st = self.session.status()
+        changes = diff_patches(describe(st["stored"], self.catalog), describe(edit, self.catalog))
+        return {"slot": st["slot"], "patch": describe(edit, self.catalog), "changes": changes}
+
     # --- tools -------------------------------------------------------------------------------
 
     def list_patches(self, refresh: bool) -> dict:
@@ -328,16 +361,8 @@ class _Server:
 
     def install_patch(self, slot: int, file: str | None, spec: dict | None,
                       select: bool) -> dict:
-        if (file is None) == (spec is None):
-            raise ToolError("install_patch needs exactly one of 'file' (a .zptc path) or "
-                            "'spec' (a patch spec)")
         with _tool_errors():
-            if spec is not None:
-                data, warnings = self._build(spec)
-                path = self._save(data, ptcf.parse(data).name)
-            else:
-                path = self._file(file)
-                data, warnings = load_zptc(path), []
+            data, warnings, path = self._source("install_patch", file, spec)
             patch = describe(data, self.catalog, slot=slot)
             warnings += self._duplicates(patch["name"], pedal=True)
             out = self.session.install(data, slot, select)
@@ -377,8 +402,9 @@ class _Server:
                                    **{k: v for k, v in describe(need(raw["selected_patch"]),
                                                                 self.catalog).items()
                                       if k in ("name", "description")}})
-        field("edited", lambda: used_bytes(need(raw["edit"]))
-              != used_bytes(need(raw["selected_patch"])))
+        field("edited", lambda: bool(diff_patches(describe(need(raw["selected_patch"]),
+                                                          self.catalog),
+                                                 describe(need(raw["edit"]), self.catalog))))
         g = raw["global"]
         field("auto_save", lambda: decode_global(need(g))["auto_save"])
         field("tempo", lambda: decode_global(need(g))["tempo"])
@@ -417,6 +443,76 @@ class _Server:
             summary += f" (could not read: {', '.join(failed)})"
         out["summary"] = summary or "nothing could be read from the pedal"
         return out
+
+    def pedal_status(self) -> dict:
+        with _tool_errors():
+            st = self.session.status()
+            stored = describe(st["stored"], self.catalog)
+            edit = describe(st["edit"], self.catalog)
+        changes = diff_patches(stored, edit)
+        auto = {True: "on", False: "off", None: "unknown"}[st["auto_save"]]
+        extra = (f", auditioning from scratch slot {st['scratch']} (revert_edit returns to slot "
+                 f"{st['audition_from']})" if st["scratch"] else "")
+        what = f"{len(changes)} unsaved change(s)" if changes else "no unsaved changes"
+        return {"slot": st["slot"], "stored_name": stored["name"], "auto_save": st["auto_save"],
+                "edited": bool(changes), "changes": changes, "scratch_slot": st["scratch"],
+                "audition_from": st["audition_from"], "patch": edit,
+                "summary": f"Slot {st['slot']} {stored['name']}: {what}, AUTO SAVE {auto}{extra}"}
+
+    def audition_patch(self, file: str | None, spec: dict | None) -> dict:
+        with _tool_errors():
+            data, warnings, path = self._source("audition_patch", file, spec)
+            out = self.session.audition(data)
+            patch = describe(out["edit"], self.catalog)
+        return {"slot": out["slot"], "audition_from": out["audition_from"], "file": str(path),
+                "warnings": warnings, "patch": patch, "full_backup": out["full_backup"],
+                "summary": f"Auditioning {patch['name']!r} from scratch slot {out['slot']}; "
+                           f"revert_edit returns to slot {out['audition_from']}"}
+
+    def set_knob(self, entry: int, effect: str, knob: str, value: Any) -> dict:
+        fx_id, info = self._find(effect)
+        index, param = self._knob(info, knob)
+        with _tool_errors():
+            raw = raw_value(param, value)
+            out = self._live_result(self.session.set_param(entry, fx_id, index, raw))
+        shown = display_value(param, raw)
+        return {**out, "summary": f"{info.name} (entry {entry}) {param.name} = {shown}; "
+                                  f"{len(out['changes'])} unsaved change(s)"}
+
+    def set_effect_on(self, entry: int, effect: str, on: bool) -> dict:
+        fx_id, info = self._find(effect)
+        with _tool_errors():
+            out = self._live_result(self.session.set_effect_on(entry, fx_id, on))
+        return {**out, "summary": f"{info.name} (entry {entry}) {'on' if on else 'off'}; "
+                                  f"{len(out['changes'])} unsaved change(s)"}
+
+    def revert_edit(self) -> dict:
+        with _tool_errors():
+            slot, edit = self.session.revert()
+            patch = describe(edit, self.catalog)
+        return {"slot": slot, "patch": patch,
+                "summary": f"Slot {slot} {patch['name']}: playing the stored patch again"}
+
+    def save_edit(self, slot: int, name: str | None, description: str | None) -> dict:
+        with _tool_errors():
+            p = ptcf.parse(used_bytes(self.session.read_edit()))
+            warnings: list[str] = []
+            if name is not None:
+                ptcf.set_name(p, _check_name(name))
+            elif p.name.strip() == EMPTY_NAME:
+                raise ToolError("the patch the pedal plays is named Empty; give save_edit a "
+                                "name")
+            if description is not None:
+                ptcf.set_comment(p, _check_description(description, warnings))
+            data = ptcf.encode(p)
+            path = self._save(data, p.name)
+            patch = describe(data, self.catalog, slot=slot)
+            warnings += self._duplicates(patch["name"], pedal=True)
+            out = self.session.install(data, slot, False)
+        note = f", {len(warnings)} warning(s)" if warnings else ""
+        return {**out, "file": str(path), "warnings": warnings, "patch": patch,
+                "summary": f"Saved what the pedal plays as {patch['name']!r} in slot {slot}"
+                           f"{note}"}
 
     def backup_pedal(self) -> dict:
         with _tool_errors():
@@ -506,6 +602,60 @@ def build_server(session: PedalSession, catalog: dict | None = None,
         "memory overview from the newest backup. A field that cannot be read shows its error."))
     def pedal_info() -> dict[str, Any]:
         return impl.pedal_info()
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "What the pedal plays now: its slot, AUTO SAVE, whether the patch has unsaved changes "
+        "(and which, in display units, against the stored slot), and a running audition."))
+    def pedal_status() -> dict[str, Any]:
+        return impl.pedal_status()
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Play a patch on the pedal to try it: give exactly one of file (.zptc) or spec. It is "
+        "installed to a scratch Empty slot (the highest free one; a new audition replaces it) "
+        "and selected; revert_edit goes back and empties the scratch slot, save_edit keeps it "
+        "in a slot of your choice. Refused while AUTO SAVE is on. " + SPEC_TEXT))
+    def audition_patch(file: Annotated[str | None, Field(description=".zptc file")] = None,
+                       spec: Annotated[dict[str, Any] | None, Field(description="Patch spec")]
+                       = None) -> dict[str, Any]:
+        return impl.audition_patch(file, spec)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Turn one knob of the patch the pedal plays now; nothing is stored. Name the effect "
+        "expected at the chain entry (refused if it is not there, e.g. after a footswitch "
+        "press). Value in display units as effect_info shows them, or {\"raw\": n}. The pedal "
+        "is read back. Refused while AUTO SAVE is on."))
+    def set_knob(entry: Annotated[int, Field(description="Chain-entry index, as get_patch "
+                                                         "shows it")],
+                 effect: Annotated[str, Field(description="Effect expected there, e.g. Phaser")],
+                 knob: Annotated[str, Field(description="Knob name, e.g. Rate")],
+                 value: Annotated[Any, Field(description="Display value or {\"raw\": n}")]
+                 ) -> dict[str, Any]:
+        return impl.set_knob(entry, effect, knob, value)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Switch one effect of the patch the pedal plays now on or off; nothing is stored. "
+        "Name the effect expected at the chain entry. Read back. Refused while AUTO SAVE is "
+        "on."))
+    def set_effect_on(entry: Annotated[int, Field(description="Chain-entry index")],
+                      effect: Annotated[str, Field(description="Effect expected there")],
+                      on: bool) -> dict[str, Any]:
+        return impl.set_effect_on(entry, effect, on)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Drop unsaved changes: the pedal plays the stored patch again. After an audition it "
+        "returns to the slot selected before and empties the scratch slot."))
+    def revert_edit() -> dict[str, Any]:
+        return impl.revert_edit()
+
+    @server.tool(annotations=DESTRUCTIVE, structured_output=True, description=(
+        "Store what the pedal plays now (with its unsaved changes) to an Empty slot (1-240), "
+        "with v1's install rules (backups, log, Empty slots only); optional new name and "
+        "description. The pedal keeps playing what it played."))
+    def save_edit(slot: Slot,
+                  name: Annotated[str | None, Field(description="New patch name")] = None,
+                  description: Annotated[str | None, Field(description="New description")]
+                  = None) -> dict[str, Any]:
+        return impl.save_edit(slot, name, description)
 
     @server.tool(annotations=BACKUP, structured_output=True, description=(
         "Read all 240 slots (1-240) of the pedal into a new full backup folder under backup/ "
