@@ -175,6 +175,34 @@ class PedalSession:
         with self._device() as dev:
             return dev.selected_slot() + 1
 
+    def info(self) -> dict:
+        """Everything the pedal reports about itself, raw; a read that fails is reported as
+        {"error": ...} and does not stop the others (one port open for all)."""
+        out = {}
+
+        def read(key, fn):
+            try:
+                out[key] = fn()
+            except Exception as e:  # noqa: BLE001 - every failure is reported per field
+                out[key] = {"error": f"{type(e).__name__}: {e}"}
+
+        with self._device() as dev:
+            read("identity", lambda: bytes(dev.identity()))
+            read("patch_info", dev.patch_info)
+            read("selected_slot", lambda: dev.selected_slot() + 1)
+            sel = out["selected_slot"]
+            if isinstance(sel, int):
+                read("selected_patch", lambda: bytes(dev.read_slot(sel - 1)))
+            else:
+                out["selected_patch"] = {"error": "selected slot unknown"}
+            read("edit", lambda: bytes(dev.read_edit()))
+            read("global", lambda: bytes(dev.global_info()["raw"]))
+            read("memory_used", lambda: float(dev.memory_usage()))
+            read("effect_list", lambda: bytes(dev.read_effect_list()))
+            read("product_info", dev.product_info)
+            read("patch_capabilities", dev.patch_capabilities)
+        return out
+
     def backup(self) -> str:
         with self._device() as dev:
             return self._backup(dev)

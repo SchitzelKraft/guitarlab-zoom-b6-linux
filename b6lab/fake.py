@@ -32,6 +32,9 @@ class FakeB6:
         self.presses = []          # positions of press_effect calls, for tests
         self.params_sent = []      # (position, module, index, value) of set_param calls
         self.closed = False
+        # global data reply (64 09) as the B6 sends it: tempo 120, calibration 440 Hz, AUTO SAVE
+        # off (byte 12)
+        self.global_reply = bytes.fromhex("52 00 6e 64 09 78 00 00 01 05 00 00 00 00 00 00 00")
 
     def _check_timeout(self):
         if self.timeout_next:
@@ -41,6 +44,21 @@ class FakeB6:
     def identity(self):
         self._check_timeout()
         return bytes([0x7E, 0x00, 0x06, 0x02, 0x52, 0x6E, 0x00, 0x00, 0x00, 0x31, 0x2E, 0x30, 0x30])
+
+    def patch_info(self):
+        self._check_timeout()
+        return {"count": len(self.slots), "size": len(self.slots[0]), "raw": ""}
+
+    def global_info(self):
+        self._check_timeout()
+        r = self.global_reply
+        return {"tempo": r[5] | r[6] << 7, "auto_save": bool(r[12]), "raw": r}
+
+    def product_info(self):
+        return {"visible_width": 5, "raw": bytes.fromhex("52 00 6e 64 10 70 01 02 05 03")}
+
+    def patch_capabilities(self):
+        return {"flags": 130, "raw": bytes.fromhex("52 00 6e 47 02 01 00 00 00")}
 
     def patch_count(self):
         self._check_timeout()

@@ -23,7 +23,9 @@ from b6lab import effects, ptcf
 from b6lab.effect_models import load_models
 from b6lab.knobs import KnobError, display_value
 from b6lab.library import list_backups, load_zptc
-from b6lab.patchspec import References, SpecError, build, describe, reference_index
+from b6lab.device import used_bytes
+from b6lab.patchspec import EMPTY_NAME, References, SpecError, build, describe, reference_index
+from b6lab.pedal_info import decode_global, decode_identity, effects_overview
 from b6lab.pedal_session import SLOTS, PedalError, PedalSession
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -349,6 +351,73 @@ class _Server:
             out = self.session.clear(slot)
         return {**out, "summary": f"Slot {slot} is Empty again (removed {out['removed']!r})"}
 
+    def pedal_info(self) -> dict:
+        with _tool_errors():
+            raw = self.session.info()
+        out: dict = {}
+
+        def field(key, fn):
+            try:
+                out[key] = fn()
+            except Exception as e:  # noqa: BLE001 - one field failing never fails the call
+                out[key] = {"error": f"{type(e).__name__}: {e}"}
+
+        def need(value):
+            if isinstance(value, dict) and "error" in value:
+                raise ValueError(value["error"])
+            return value
+
+        ident = raw["identity"]
+        field("model", lambda: decode_identity(need(ident))["model"])
+        field("firmware", lambda: decode_identity(need(ident))["firmware"])
+        field("identity_raw", lambda: need(ident).hex(" "))
+        field("patch_slots", lambda: {k: v for k, v in need(raw["patch_info"]).items()
+                                      if k != "raw"})
+        field("selected", lambda: {"slot": need(raw["selected_slot"]),
+                                   **{k: v for k, v in describe(need(raw["selected_patch"]),
+                                                                self.catalog).items()
+                                      if k in ("name", "description")}})
+        field("edited", lambda: used_bytes(need(raw["edit"]))
+              != used_bytes(need(raw["selected_patch"])))
+        g = raw["global"]
+        field("auto_save", lambda: decode_global(need(g))["auto_save"])
+        field("tempo", lambda: decode_global(need(g))["tempo"])
+        field("tuner_hz", lambda: decode_global(need(g))["tuner_hz"])
+        field("global_params", lambda: decode_global(need(g))["params"])
+        field("global_raw", lambda: decode_global(need(g))["raw"])
+        field("memory_used_percent", lambda: round(need(raw["memory_used"]) * 100))
+        field("effects", lambda: effects_overview(need(raw["effect_list"]), self.catalog))
+        field("visible_chain_width", lambda: need(raw["product_info"])["visible_width"])
+        field("support_patch_flags", lambda: {
+            "flags": need(raw["patch_capabilities"])["flags"],
+            "raw": bytes(need(raw["patch_capabilities"])["raw"]).hex(" "),
+            "status": "meaning unknown"})
+
+        def patch_memory():
+            listing = self.session.list_patches(False)
+            pts = listing["patches"]
+            empty = sum(1 for p in pts if p["empty"])
+            named = [p["slot"] for p in pts if p["name"].strip() == EMPTY_NAME and not p["empty"]]
+            return {"in_use": len(pts) - empty, "empty": empty,
+                    "named_empty_not_empty": named, "backup": listing["source"],
+                    "backup_age_minutes": listing["age_minutes"]}
+        field("patch_memory", patch_memory)
+
+        def part(key, fmt):
+            v = out.get(key)
+            return fmt(v) if v is not None and not (isinstance(v, dict) and "error" in v) else None
+        bits = [part("model", lambda v: f"{v} firmware {out.get('firmware')}"),
+                part("selected", lambda v: f"slot {v['slot']} {v.get('name', '')}".strip()),
+                part("auto_save", lambda v: f"AUTO SAVE {'on' if v else 'off'}"),
+                part("memory_used_percent", lambda v: f"effect memory {v} %"),
+                part("effects", lambda v: f"{v['installed']} effects installed")]
+        failed = [k for k, v in out.items() if isinstance(v, dict) and "error" in v]
+        summary = ", ".join(b for b in bits if b)
+        if failed:
+            summary += f" (could not read: {', '.join(failed)})"
+        out["summary"] = summary or "nothing could be read from the pedal"
+        return out
+
     def backup_pedal(self) -> dict:
         with _tool_errors():
             path = self.session.backup()
@@ -428,6 +497,15 @@ def build_server(session: PedalSession, catalog: dict | None = None,
         "touched."))
     def clear_slot(slot: Slot) -> dict[str, Any]:
         return impl.clear_slot(slot)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Everything the pedal reports about itself: model and firmware, patch slots, the "
+        "selected patch and whether it has unsaved edits, tempo, tuner calibration, AUTO SAVE, "
+        "the other global settings (raw, names from the decompile), effect memory used, "
+        "installed effects with versions, chain width, Support Patch flags (raw), and a patch "
+        "memory overview from the newest backup. A field that cannot be read shows its error."))
+    def pedal_info() -> dict[str, Any]:
+        return impl.pedal_info()
 
     @server.tool(annotations=BACKUP, structured_output=True, description=(
         "Read all 240 slots (1-240) of the pedal into a new full backup folder under backup/ "
