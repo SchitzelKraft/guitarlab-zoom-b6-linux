@@ -19,7 +19,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
-from b6lab import effects, ptcf
+from b6lab import draw, effects, ptcf
 from b6lab.effect_models import load_models
 from b6lab.knobs import KnobError, display_value, raw_value
 from b6lab.library import list_backups, load_zptc
@@ -48,7 +48,9 @@ B6 Lab. Claude cannot hear the pedal; the user judges the sound.
 Tuning: audition_patch plays a patch from a scratch Empty slot; set_knob and set_effect_on
 change only what the pedal plays now (nothing is stored) and name the effect they expect at
 the chain entry; all three are refused while the pedal's AUTO SAVE is on. Keep the result with
-save_edit (to an Empty slot), drop it with revert_edit; pedal_status shows what changed."""
+save_edit (to an Empty slot), drop it with revert_edit; pedal_status shows what changed.
+Results with a "drawing" (or draw_patch's "text") are a text pedalboard: show it to the user
+verbatim in a code block."""
 
 SLOT_TEXT = "Slot number 1-240, as shown on the pedal."
 
@@ -272,6 +274,10 @@ class _Server:
         path = self._file(file)
         return load_zptc(path), [], path
 
+    def _drawing(self, data: bytes, slot: int | None = None) -> str:
+        return draw.render(describe(data, self.catalog), slot=slot,
+                           entries=len(ptcf.parse(data).effects))
+
     def _knob(self, info, knob: str):
         wanted = knob.strip().lower()
         for i, param in enumerate(info.params):
@@ -298,13 +304,32 @@ class _Server:
     def get_patch(self, slot: int) -> dict:
         with _tool_errors():
             data = self.session.read_slot(slot)
-            return {"slot": slot, **describe(data, self.catalog, slot=slot)}
+            return {"slot": slot, **describe(data, self.catalog, slot=slot),
+                    "drawing": self._drawing(data, slot)}
 
     def current_patch(self) -> dict:
         with _tool_errors():
             slot = self.session.current_slot()
             data = self.session.read_slot(slot)
-            return {"slot": slot, **describe(data, self.catalog, slot=slot)}
+            return {"slot": slot, **describe(data, self.catalog, slot=slot),
+                    "drawing": self._drawing(data, slot)}
+
+    def draw_patch(self, slot: int | None, file: str | None, spec: dict | None,
+                   current: bool) -> dict:
+        if sum(x is not None for x in (slot, file, spec)) + bool(current) != 1:
+            raise ToolError("draw_patch needs exactly one of slot, file, spec or current=true")
+        with _tool_errors():
+            if slot is not None:
+                data = self.session.read_slot(slot)
+            elif current:
+                data = self.session.read_edit()
+                slot = self.session.current_slot()
+            elif file is not None:
+                data = load_zptc(self._file(file))
+            else:
+                data, _ = self._build(spec)
+            text = self._drawing(data, slot)
+        return {"text": text, "summary": describe(data, self.catalog, slot=slot)["summary"]}
 
     def list_effects(self, group: str | None) -> dict:
         with _tool_errors():
@@ -460,6 +485,7 @@ class _Server:
         return {"slot": st["slot"], "stored_name": stored["name"], "auto_save": st["auto_save"],
                 "edited": bool(changes), "changes": changes, "scratch_slot": st["scratch"],
                 "audition_from": st["audition_from"], "patch": edit,
+                "drawing": self._drawing(st["edit"], st["slot"]),
                 "summary": f"Slot {st['slot']} {stored['name']}: {what}, AUTO SAVE {auto}{extra}"}
 
     def audition_patch(self, file: str | None, spec: dict | None) -> dict:
@@ -605,6 +631,16 @@ def build_server(session: PedalSession, catalog: dict | None = None,
         "memory overview from the newest backup. A field that cannot be read shows its error."))
     def pedal_info() -> dict[str, Any]:
         return impl.pedal_info()
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Draw a patch as a text pedalboard (boxes per effect, on/off, knobs in display units, "
+        "footswitch marks): give exactly one of slot (read from the pedal), file (.zptc), spec, "
+        "or current=true (what the pedal plays now). Show the text verbatim in a code block."))
+    def draw_patch(slot: Annotated[int | None, Field(description=SLOT_TEXT)] = None,
+                   file: Annotated[str | None, Field(description=".zptc file")] = None,
+                   spec: Annotated[dict[str, Any] | None, Field(description="Patch spec")] = None,
+                   current: bool = False) -> dict[str, Any]:
+        return impl.draw_patch(slot, file, spec, current)
 
     @server.tool(annotations=READ_ONLY, structured_output=True, description=(
         "What the pedal plays now: its slot, AUTO SAVE, whether the patch has unsaved changes "
