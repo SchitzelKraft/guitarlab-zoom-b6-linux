@@ -33,6 +33,14 @@ from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
 TAIL = 1  # fx_id of the second half of a double-width effect
+
+
+def _shapes(fx_id: int, wide: bool | None) -> list[list[int]]:
+    """Chain entries an added or changed effect may take: with its tail when double width;
+    either when the width is unknown (None: no stored patch uses the effect)."""
+    if wide is None:
+        return [[fx_id], [fx_id, TAIL]]
+    return [[fx_id, TAIL]] if wide else [[fx_id]]
 LIVE_SETTLE = 0.25  # seconds before reading back a live knob or on/off change
 SELECT_SETTLE = 0.5  # seconds after selecting a slot before reading the edit buffer
 AUTO_SAVE_TEXT = "switch AUTO SAVE off on the pedal (SYSTEM > AUTO SAVE)"
@@ -325,7 +333,7 @@ class PedalSession:
                              "(revert_edit drops it)")
         return after
 
-    def add_effect(self, entry: int, fx_id: int, expect_at: Optional[int], wide: bool,
+    def add_effect(self, entry: int, fx_id: int, expect_at: Optional[int], wide: bool | None,
                    load: Optional[float]) -> bytes:
         def before(p, edit):
             n = len(p.effects)
@@ -349,9 +357,9 @@ class PedalSession:
 
         def check(a, b):
             # the chain grew by the new effect and everything else is still there, in order
-            new = [fx_id] + ([TAIL] if wide else [])
-            want = [e.fx_id for e in a.effects[:entry]] + new + [e.fx_id for e in a.effects[entry:]]
-            return [e.fx_id for e in b.effects] == want
+            got = [e.fx_id for e in b.effects]
+            return any(got == [e.fx_id for e in a.effects[:entry]] + new
+                       + [e.fx_id for e in a.effects[entry:]] for new in _shapes(fx_id, wide))
 
         return self._chain_edit(entry, None, send, check,
                                 f"add {self.effect_name(fx_id)} at entry {entry} (no room "
@@ -380,15 +388,16 @@ class PedalSession:
                                 f"move {self.effect_name(fx_id)} from entry {entry} to {to}",
                                 before)
 
-    def change_effect(self, entry: int, fx_id: int, to_fx: int, wide: bool = False) -> bytes:
+    def change_effect(self, entry: int, fx_id: int, to_fx: int,
+                      wide: bool | None = False) -> bytes:
         def check(a, b):
             # the effect at `entry` changed type (with its own second half when double width)
             # and every other effect is still there, in order
             old_w = 2 if entry + 1 < len(a.effects) and a.effects[entry + 1].is_tail else 1
-            new = [to_fx] + ([TAIL] if wide else [])
-            want = ([e.fx_id for e in a.effects[:entry]] + new
-                    + [e.fx_id for e in a.effects[entry + old_w:]])
-            return [e.fx_id for e in b.effects] == want
+            got = [e.fx_id for e in b.effects]
+            return any(got == [e.fx_id for e in a.effects[:entry]] + new
+                       + [e.fx_id for e in a.effects[entry + old_w:]]
+                       for new in _shapes(to_fx, wide))
         return self._chain_edit(entry, fx_id, lambda dev: dev.change_type(entry, to_fx), check,
                                 f"change {self.effect_name(fx_id)} at entry {entry} into "
                                 f"{self.effect_name(to_fx)}")

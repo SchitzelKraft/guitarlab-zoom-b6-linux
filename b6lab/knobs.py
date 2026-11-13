@@ -35,7 +35,7 @@ def _valid_description(param: ParamInfo) -> str:
         hi = lo + Decimal(param.display_step) * param.display_through
         return (f"valid range: {lo:.{param.display_precision}f} to "
                 f"{hi:.{param.display_precision}f}, or a tempo-synced note value as "
-                f'{{"raw": {param.display_through + 1}..{param.raw_max}}}')
+                f'{{"raw": {param.display_through + 1}..{"" if param.raw_max is None else param.raw_max}}}')
     if _has_scale(param):
         lo = Decimal(param.display_min)
         hi = lo + Decimal(param.display_step) * param.raw_max if param.raw_max is not None else None

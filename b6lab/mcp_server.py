@@ -521,11 +521,15 @@ class _Server:
         return {**out, "drawing": self._drawing(edit, out["slot"]),
                 "summary": f"{summary}; {len(out['changes'])} unsaved change(s)"}
 
+    def _wide(self, fx_id: int) -> bool | None:
+        """Double width as seen in a stored patch; None when no stored patch uses it."""
+        ref = self.refs.get(fx_id)
+        return None if ref is None else ref[1] is not None
+
     def add_effect(self, entry: int, effect: str, expect_at: str | None) -> dict:
         fx_id, info = self._find(effect)
         expect = self._find(expect_at)[0] if expect_at else None
-        ref = self.refs.get(fx_id)
-        wide = ref is not None and ref[1] is not None
+        wide = self._wide(fx_id)
         with _tool_errors():
             edit = self.session.add_effect(entry, fx_id, expect, wide, effect_load(fx_id))
         return self._chain_result(edit, f"Added {info.name} at entry {entry}")
@@ -546,9 +550,7 @@ class _Server:
         fx_id, info = self._find(effect)
         to_fx, to_info = self._find(to_effect)
         with _tool_errors():
-            ref = self.refs.get(to_fx)
-            edit = self.session.change_effect(entry, fx_id, to_fx,
-                                              ref is not None and ref[1] is not None)
+            edit = self.session.change_effect(entry, fx_id, to_fx, self._wide(to_fx))
         return self._chain_result(edit, f"Entry {entry}: {info.name} -> {to_info.name}")
 
     def revert_edit(self) -> dict:
