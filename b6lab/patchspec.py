@@ -306,3 +306,35 @@ def build(spec: dict, refs: References, catalog: dict) -> tuple[bytes, list[str]
             or check.prm2 != [body] or check.name != name.rstrip()):
         raise SpecError("internal error: the encoded patch does not read back as built")
     return data, warnings
+
+
+def _show(value) -> str:
+    if isinstance(value, dict) and "raw" in value:
+        return f"raw {value['raw']}"
+    return str(value)
+
+
+def diff_patches(stored: dict, edit: dict) -> list[str]:
+    """Readable differences between two `describe` outputs (e.g. stored slot vs edit buffer):
+    name, description, level, then per chain entry the effect, on/off and every knob."""
+    out = []
+    for key in ("name", "description", "level"):
+        if stored.get(key) != edit.get(key):
+            out.append(f"{key}: {stored.get(key)!r} -> {edit.get(key)!r}" if key != "level"
+                       else f"level: {stored.get(key)} -> {edit.get(key)}")
+    a = {e["entry"]: e for e in stored.get("effects", [])}
+    b = {e["entry"]: e for e in edit.get("effects", [])}
+    for entry in sorted(set(a) | set(b)):
+        x, y = a.get(entry), b.get(entry)
+        if x is None or y is None or x["effect"] != y["effect"]:
+            out.append(f"entry {entry}: {x['effect'] if x else '(none)'} -> "
+                       f"{y['effect'] if y else '(none)'}")
+            continue
+        where = f"{x['effect']} (entry {entry})"
+        if x["on"] != y["on"]:
+            out.append(f"{where}: {'on' if x['on'] else 'off'} -> {'on' if y['on'] else 'off'}")
+        for knob, old in x["knobs"].items():
+            new = y["knobs"].get(knob)
+            if new != old:
+                out.append(f"{where} {knob}: {_show(old)} -> {_show(new)}")
+    return out
