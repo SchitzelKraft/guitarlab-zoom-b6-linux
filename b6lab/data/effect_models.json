@@ -1,0 +1,716 @@
+{
+ "SlowATTCK": {
+  "group": "DYNAMICS",
+  "gear": "volume swell, like the BOSS SG-1 Slow Gear",
+  "basis": "Guess",
+  "notes": "violin-like attack"
+ },
+ "ZNR": {
+  "group": "DYNAMICS",
+  "gear": "ZOOM noise reduction",
+  "basis": "Original",
+  "notes": ""
+ },
+ "OptComp": {
+  "group": "DYNAMICS",
+  "gear": "optical compressor",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BlackOpt": {
+  "group": "DYNAMICS",
+  "gear": "Demeter COMP-1 Compulator",
+  "basis": "Zoom",
+  "notes": "extra tone controls"
+ },
+ "LMT-76": {
+  "group": "DYNAMICS",
+  "gear": "UREI 1176LN",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "160 Comp": {
+  "group": "DYNAMICS",
+  "gear": "dbx 160A",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "DualComp": {
+  "group": "DYNAMICS",
+  "gear": "two-band compressor",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "MB Comp": {
+  "group": "DYNAMICS",
+  "gear": "\"MultiComp (MODE:MB)\"",
+  "basis": "Zoom",
+  "notes": "Zoom names it only as MultiComp, unit not further identified"
+ },
+ "DYN Comp": {
+  "group": "DYNAMICS",
+  "gear": "MXR Dyna Comp",
+  "basis": "Zoom",
+  "notes": "extra tone and attack controls"
+ },
+ "Glam Comp": {
+  "group": "DYNAMICS",
+  "gear": "compressor with Shape control",
+  "basis": "Original",
+  "notes": ""
+ },
+ "SeqFLTR": {
+  "group": "FILTER",
+  "gear": "Z.Vex Seek-Wah",
+  "basis": "Zoom",
+  "notes": "\"has the flavor of\""
+ },
+ "EG FLTR": {
+  "group": "FILTER",
+  "gear": "footswitch-triggered filter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Exciter": {
+  "group": "FILTER",
+  "gear": "harmonic exciter, the Aphex Aural Exciter idea",
+  "basis": "Guess",
+  "notes": ""
+ },
+ "BassA-Wah": {
+  "group": "FILTER",
+  "gear": "bass auto-wah",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Z Tron": {
+  "group": "FILTER",
+  "gear": "Electro-Harmonix Q-Tron (LP mode)",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "A-Filter": {
+  "group": "FILTER",
+  "gear": "resonant envelope filter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Bass Cry": {
+  "group": "FILTER",
+  "gear": "talking modulator (talk-box-like filter)",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BassGEQ": {
+  "group": "FILTER",
+  "gear": "7-band bass graphic EQ, like the BOSS GEB-7",
+  "basis": "Guess",
+  "notes": ""
+ },
+ "St Ba GEQ": {
+  "group": "FILTER",
+  "gear": "stereo version of BassGEQ",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BassPEQ": {
+  "group": "FILTER",
+  "gear": "1-band parametric EQ",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Splitter": {
+  "group": "FILTER",
+  "gear": "high/low band splitter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Low EQ": {
+  "group": "FILTER",
+  "gear": "low-frequency EQ with selectable type",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "High EQ": {
+  "group": "FILTER",
+  "gear": "high-frequency EQ with selectable type",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "EnvFilter": {
+  "group": "FILTER",
+  "gear": "MXR envelope filter (the M82 Bass Envelope Filter)",
+  "basis": "Zoom / Likely",
+  "notes": "Zoom says \"MXR envelope filter\"; the M82 is MXR's bass version"
+ },
+ "EP Stomp": {
+  "group": "DRIVE",
+  "gear": "Maestro Echoplex preamp (EP-3)",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "RC Boost": {
+  "group": "DRIVE",
+  "gear": "Xotic RC Booster",
+  "basis": "Likely",
+  "notes": "name match; Zoom only says \"booster\""
+ },
+ "NYC Muff": {
+  "group": "DRIVE",
+  "gear": "Electro-Harmonix Big Muff Pi",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "TS+Boost": {
+  "group": "DRIVE",
+  "gear": "Ibanez Tube Screamer plus a booster",
+  "basis": "Likely",
+  "notes": "Zoom: \"combines TS Drive and Booster\""
+ },
+ "Squeak": {
+  "group": "DRIVE",
+  "gear": "ProCo RAT",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "Bass OD": {
+  "group": "DRIVE",
+  "gear": "BOSS ODB-3",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "BassTsDRV": {
+  "group": "DRIVE",
+  "gear": "Ibanez TS808",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "Dark OD": {
+  "group": "DRIVE",
+  "gear": "Darkglass Microtubes B3K",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "BlueB BOD": {
+  "group": "DRIVE",
+  "gear": "Mad Professor Blueberry Bass Overdrive",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "VooDoo-B": {
+  "group": "DRIVE",
+  "gear": "Roger Mayer Voodoo-Bass",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "BaFzSmile": {
+  "group": "DRIVE",
+  "gear": "Fuzz Face (Dallas Arbiter / Dunlop)",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "BassMetal": {
+  "group": "DRIVE",
+  "gear": "BOSS Metal Zone (MT-2)",
+  "basis": "Zoom",
+  "notes": "dry/wet mix added"
+ },
+ "BassOctFZ": {
+  "group": "DRIVE",
+  "gear": "octave-up fuzz, Octavia style",
+  "basis": "Guess",
+  "notes": ""
+ },
+ "Bass DRV": {
+  "group": "PREAMP",
+  "gear": "Tech 21 SansAmp Bass Driver DI",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "D.I Plus": {
+  "group": "PREAMP",
+  "gear": "MXR Bass D.I.+",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "Dark Pre": {
+  "group": "PREAMP",
+  "gear": "Darkglass Microtubes B7K",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "Bass BB": {
+  "group": "PREAMP",
+  "gear": "Xotic Bass BB Preamp",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "DI-5": {
+  "group": "PREAMP",
+  "gear": "Avalon Design U5",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "Bass Pre": {
+  "group": "PREAMP",
+  "gear": "preamp with 3-band EQ",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Pre1073": {
+  "group": "PREAMP",
+  "gear": "Neve 1073",
+  "basis": "Likely",
+  "notes": "Zoom: \"vintage mic preamp characterized by its transformers\""
+ },
+ "SolidPre": {
+  "group": "PREAMP",
+  "gear": "SSL console mic preamp (VHD)",
+  "basis": "Likely",
+  "notes": "Zoom: \"solid-state mic preamp made by a console manufacturer\", with harmonics control"
+ },
+ "Clear DRV": {
+  "group": "PREAMP",
+  "gear": "linear-phase EQ distortion",
+  "basis": "Original",
+  "notes": ""
+ },
+ "SpLoPre": {
+  "group": "PREAMP",
+  "gear": "extreme low-end amp",
+  "basis": "Original",
+  "notes": ""
+ },
+ "DjentPre": {
+  "group": "PREAMP",
+  "gear": "clean lows, distorted highs",
+  "basis": "Original",
+  "notes": ""
+ },
+ "AMPG SVT": {
+  "group": "BASS AMP",
+  "gear": "Ampeg SVT",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "BMAN100": {
+  "group": "BASS AMP",
+  "gear": "Fender Bassman 100",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SMR400": {
+  "group": "BASS AMP",
+  "gear": "SWR SM-400",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "AG 750": {
+  "group": "BASS AMP",
+  "gear": "Aguilar DB 750",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "TE400SMX": {
+  "group": "BASS AMP",
+  "gear": "Trace Elliot AH400SMX",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "AC 370": {
+  "group": "BASS AMP",
+  "gear": "Acoustic 370",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "Mini MkB": {
+  "group": "BASS AMP",
+  "gear": "Markbass Minimark 802",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "EBH360": {
+  "group": "BASS AMP",
+  "gear": "EBS HD360",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "FlipTop": {
+  "group": "BASS AMP",
+  "gear": "Ampeg B-15N (Portaflex \"flip top\")",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SUN CB": {
+  "group": "BASS AMP",
+  "gear": "Sunn Coliseum Bass",
+  "basis": "Likely",
+  "notes": "Zoom: \"vintage solid-state amp from the 70s\""
+ },
+ "Monotone": {
+  "group": "BASS AMP",
+  "gear": "Polytone Mini-Brute",
+  "basis": "Likely",
+  "notes": "Zoom: \"solid-state combo amp great for jazz\"; factory patch \"Poly Combo\" uses it"
+ },
+ "SVT8x10": {
+  "group": "CABINET",
+  "gear": "Ampeg SVT-810E, 8x10\"",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SVT4x10TW": {
+  "group": "CABINET",
+  "gear": "Ampeg SVT-410HLF, 4x10\" + tweeter",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "FD-B4x12": {
+  "group": "CABINET",
+  "gear": "Fender Bassman 100 cabinet, 4x12\"",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SMR4x10TW": {
+  "group": "CABINET",
+  "gear": "SWR Goliath, 4x10\" + tweeter",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "AG4x10TW": {
+  "group": "CABINET",
+  "gear": "Aguilar GS410, 4x10\" + tweeter",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "TE4x10": {
+  "group": "CABINET",
+  "gear": "Trace Elliot 1048, 4x10\"",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "AC1x18": {
+  "group": "CABINET",
+  "gear": "Acoustic 301, 1x18\"",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "MkB2x8TW": {
+  "group": "CABINET",
+  "gear": "Markbass Minimark 802, 2x8\" + tweeter",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "EB4x10TW": {
+  "group": "CABINET",
+  "gear": "EBS ProLine 410, 4x10\" + tweeter",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "AM1x15": {
+  "group": "CABINET",
+  "gear": "Ampeg B-15N, 1x15\"",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SN2x15": {
+  "group": "CABINET",
+  "gear": "Sunn Coliseum cabinet, 2x15\"",
+  "basis": "Likely",
+  "notes": "Zoom: \"vintage 70s solid-state amp cabinet\""
+ },
+ "MT1x15": {
+  "group": "CABINET",
+  "gear": "Polytone combo, 1x15\"",
+  "basis": "Likely",
+  "notes": "Zoom: \"solid-state combo cabinet great for jazz\""
+ },
+ "Tremolo": {
+  "group": "MODULATION",
+  "gear": "tremolo",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Phaser": {
+  "group": "MODULATION",
+  "gear": "phaser",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "TheVibe": {
+  "group": "MODULATION",
+  "gear": "Shin-ei Uni-Vibe",
+  "basis": "Likely",
+  "notes": "Zoom: \"vibe sound\""
+ },
+ "PitchSHFT": {
+  "group": "MODULATION",
+  "gear": "pitch shifter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "HPS": {
+  "group": "MODULATION",
+  "gear": "intelligent (scale-aware) harmonizer",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Kick FLNG": {
+  "group": "MODULATION",
+  "gear": "footswitch-triggered flanger",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "CloneCho": {
+  "group": "MODULATION",
+  "gear": "Electro-Harmonix Small Clone",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "SuperCho": {
+  "group": "MODULATION",
+  "gear": "BOSS CH-1 Super Chorus",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "CoronaTri": {
+  "group": "MODULATION",
+  "gear": "TC Electronic Corona Tri-Chorus",
+  "basis": "Zoom",
+  "notes": ""
+ },
+ "BassStCho": {
+  "group": "MODULATION",
+  "gear": "stereo bass chorus",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BaVinFLNG": {
+  "group": "MODULATION",
+  "gear": "MXR M-117R flanger",
+  "basis": "Zoom",
+  "notes": "\"similar to\"; low cut added"
+ },
+ "Ba Octave": {
+  "group": "MODULATION",
+  "gear": "octave down",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Ba AnaOct": {
+  "group": "MODULATION",
+  "gear": "analog octaver, like the BOSS OC-2",
+  "basis": "Guess",
+  "notes": ""
+ },
+ "Ba Detune": {
+  "group": "MODULATION",
+  "gear": "detune chorus",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BaMnPitch": {
+  "group": "MODULATION",
+  "gear": "monophonic bass pitch shifter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BaPlShift": {
+  "group": "MODULATION",
+  "gear": "polyphonic bass pitch shifter",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BassPhase": {
+  "group": "MODULATION",
+  "gear": "bass phaser",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Bomber": {
+  "group": "SFX",
+  "gear": "explosion sound",
+  "basis": "Original",
+  "notes": ""
+ },
+ "LoopRoll": {
+  "group": "SFX",
+  "gear": "footswitch sample-and-hold",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BaStdSyn": {
+  "group": "SFX",
+  "gear": "ZOOM bass synth",
+  "basis": "Original",
+  "notes": ""
+ },
+ "BaSynTlk": {
+  "group": "SFX",
+  "gear": "talking (vowel) bass synth",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Z-Syn": {
+  "group": "SFX",
+  "gear": "analog-style bass synth",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Defret": {
+  "group": "SFX",
+  "gear": "fretless simulation",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "PH+Dist": {
+  "group": "SFX",
+  "gear": "Roland Jet Phaser (AP-7)",
+  "basis": "Zoom",
+  "notes": "\"in the style of\""
+ },
+ "Delay": {
+  "group": "DELAY",
+  "gear": "digital delay, up to 4000 ms",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "AnalogDly": {
+  "group": "DELAY",
+  "gear": "analog (bucket-brigade) delay",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "TapeEcho": {
+  "group": "DELAY",
+  "gear": "tape echo",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "ReverseDL": {
+  "group": "DELAY",
+  "gear": "reverse delay",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "ModDelay": {
+  "group": "DELAY",
+  "gear": "modulated delay",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Hold DLY": {
+  "group": "DELAY",
+  "gear": "footswitch hold delay",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Dual DLY": {
+  "group": "DELAY",
+  "gear": "Eventide TimeFactor (DigitalDelay)",
+  "basis": "Zoom",
+  "notes": "\"based on\""
+ },
+ "Air": {
+  "group": "REVERB",
+  "gear": "Air reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Room": {
+  "group": "REVERB",
+  "gear": "Room reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BrghtRoom": {
+  "group": "REVERB",
+  "gear": "BrghtRoom reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Hall": {
+  "group": "REVERB",
+  "gear": "Hall reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BrghtHall": {
+  "group": "REVERB",
+  "gear": "BrghtHall reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "HD Hall": {
+  "group": "REVERB",
+  "gear": "HD Hall reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Spring": {
+  "group": "REVERB",
+  "gear": "Spring reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Plate": {
+  "group": "REVERB",
+  "gear": "Plate reverb",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "PDL Vol": {
+  "group": "PEDAL",
+  "gear": "volume pedal",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "BassWah": {
+  "group": "PEDAL",
+  "gear": "bass wah pedal",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "PDL Reso": {
+  "group": "PEDAL",
+  "gear": "resonant pedal wah",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Ba PDLPit": {
+  "group": "PEDAL",
+  "gear": "pedal pitch shift, DigiTech Whammy style",
+  "basis": "Likely",
+  "notes": ""
+ },
+ "Ba PDLMnP": {
+  "group": "PEDAL",
+  "gear": "monophonic pedal pitch shift, Whammy style",
+  "basis": "Likely",
+  "notes": ""
+ },
+ "Output VP": {
+  "group": "PEDAL",
+  "gear": "master output volume",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "FxLoop": {
+  "group": "SND-RTN",
+  "gear": "B6 SEND/RETURN jacks",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Send": {
+  "group": "SND-RTN",
+  "gear": "B6 SEND/RETURN jacks",
+  "basis": "Generic",
+  "notes": ""
+ },
+ "Return": {
+  "group": "SND-RTN",
+  "gear": "B6 SEND/RETURN jacks",
+  "basis": "Generic",
+  "notes": ""
+ }
+}
