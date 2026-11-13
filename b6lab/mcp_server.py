@@ -19,14 +19,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
-from b6lab import effects, ptcf
+from b6lab import draw, effects, patch_search, ptcf
 from b6lab.effect_models import load_models
 from b6lab.knobs import KnobError, display_value, raw_value
 from b6lab.library import list_backups, load_zptc
 from b6lab.device import used_bytes
 from b6lab.patchspec import (EMPTY_NAME, References, SpecError, build, describe, diff_patches,
                              reference_index)
-from b6lab.patchspec import _check_description, _check_name
+from b6lab.patchspec import _check_description, _check_name, effect_load
 from b6lab.pedal_info import decode_global, decode_identity, effects_overview
 from b6lab.pedal_session import SLOTS, PedalError, PedalSession
 
@@ -40,7 +40,8 @@ Tools for a Zoom B6 bass multi-effects pedal connected over USB. Slots are numbe
 as on the pedal. Knob values are in display units as the pedal shows them (numbers or labels
 such as "8 STG"); a knob without known display units takes {"raw": n}.
 Safety rules: patches are only installed to Empty slots (named Empty with no effects in the
-chain) and the name Empty is refused; a full backup is made before the first write (install
+chain) and the name Empty is refused; rename_patch changes only the name and description of a
+non-empty slot (checked byte for byte) and needs its current name; a full backup is made before the first write (install
 or clear) of the session and a per-slot backup before every write; every write is logged
 in backup/writes.jsonl; clear_slot only undoes this server's own unchanged installs. Only one
 program can hold the pedal's MIDI port: if a tool says the port is busy, ask the user to close
@@ -48,7 +49,9 @@ B6 Lab. Claude cannot hear the pedal; the user judges the sound.
 Tuning: audition_patch plays a patch from a scratch Empty slot; set_knob and set_effect_on
 change only what the pedal plays now (nothing is stored) and name the effect they expect at
 the chain entry; all three are refused while the pedal's AUTO SAVE is on. Keep the result with
-save_edit (to an Empty slot), drop it with revert_edit; pedal_status shows what changed."""
+save_edit (to an Empty slot), drop it with revert_edit; pedal_status shows what changed.
+Results with a "drawing" (or draw_patch's "text") are a text pedalboard: show it to the user
+verbatim in a code block."""
 
 SLOT_TEXT = "Slot number 1-240, as shown on the pedal."
 
@@ -272,6 +275,10 @@ class _Server:
         path = self._file(file)
         return load_zptc(path), [], path
 
+    def _drawing(self, data: bytes, slot: int | None = None) -> str:
+        return draw.render(describe(data, self.catalog), slot=slot,
+                           entries=len(ptcf.parse(data).effects))
+
     def _knob(self, info, knob: str):
         wanted = knob.strip().lower()
         for i, param in enumerate(info.params):
@@ -298,13 +305,32 @@ class _Server:
     def get_patch(self, slot: int) -> dict:
         with _tool_errors():
             data = self.session.read_slot(slot)
-            return {"slot": slot, **describe(data, self.catalog, slot=slot)}
+            return {"slot": slot, **describe(data, self.catalog, slot=slot),
+                    "drawing": self._drawing(data, slot)}
 
     def current_patch(self) -> dict:
         with _tool_errors():
             slot = self.session.current_slot()
             data = self.session.read_slot(slot)
-            return {"slot": slot, **describe(data, self.catalog, slot=slot)}
+            return {"slot": slot, **describe(data, self.catalog, slot=slot),
+                    "drawing": self._drawing(data, slot)}
+
+    def draw_patch(self, slot: int | None, file: str | None, spec: dict | None,
+                   current: bool) -> dict:
+        if sum(x is not None for x in (slot, file, spec)) + bool(current) != 1:
+            raise ToolError("draw_patch needs exactly one of slot, file, spec or current=true")
+        with _tool_errors():
+            if slot is not None:
+                data = self.session.read_slot(slot)
+            elif current:
+                data = self.session.read_edit()
+                slot = self.session.current_slot()
+            elif file is not None:
+                data = load_zptc(self._file(file))
+            else:
+                data, _ = self._build(spec)
+            text = self._drawing(data, slot)
+        return {"text": text, "summary": describe(data, self.catalog, slot=slot)["summary"]}
 
     def list_effects(self, group: str | None) -> dict:
         with _tool_errors():
@@ -460,6 +486,7 @@ class _Server:
         return {"slot": st["slot"], "stored_name": stored["name"], "auto_save": st["auto_save"],
                 "edited": bool(changes), "changes": changes, "scratch_slot": st["scratch"],
                 "audition_from": st["audition_from"], "patch": edit,
+                "drawing": self._drawing(st["edit"], st["slot"]),
                 "summary": f"Slot {st['slot']} {stored['name']}: {what}, AUTO SAVE {auto}{extra}"}
 
     def audition_patch(self, file: str | None, spec: dict | None) -> dict:
@@ -489,6 +516,43 @@ class _Server:
         return {**out, "summary": f"{info.name} (entry {entry}) {'on' if on else 'off'}; "
                                   f"{len(out['changes'])} unsaved change(s)"}
 
+    def _chain_result(self, edit: bytes, summary: str) -> dict:
+        out = self._live_result(edit)
+        return {**out, "drawing": self._drawing(edit, out["slot"]),
+                "summary": f"{summary}; {len(out['changes'])} unsaved change(s)"}
+
+    def _wide(self, fx_id: int) -> bool | None:
+        """Double width as seen in a stored patch; None when no stored patch uses it."""
+        ref = self.refs.get(fx_id)
+        return None if ref is None else ref[1] is not None
+
+    def add_effect(self, entry: int, effect: str, expect_at: str | None) -> dict:
+        fx_id, info = self._find(effect)
+        expect = self._find(expect_at)[0] if expect_at else None
+        wide = self._wide(fx_id)
+        with _tool_errors():
+            edit = self.session.add_effect(entry, fx_id, expect, wide, effect_load(fx_id))
+        return self._chain_result(edit, f"Added {info.name} at entry {entry}")
+
+    def remove_effect(self, entry: int, effect: str) -> dict:
+        fx_id, info = self._find(effect)
+        with _tool_errors():
+            edit = self.session.remove_effect(entry, fx_id)
+        return self._chain_result(edit, f"Removed {info.name} from entry {entry}")
+
+    def move_effect(self, entry: int, effect: str, to: int) -> dict:
+        fx_id, info = self._find(effect)
+        with _tool_errors():
+            edit = self.session.move_effect(entry, fx_id, to)
+        return self._chain_result(edit, f"Moved {info.name} from entry {entry} to {to}")
+
+    def change_effect(self, entry: int, effect: str, to_effect: str) -> dict:
+        fx_id, info = self._find(effect)
+        to_fx, to_info = self._find(to_effect)
+        with _tool_errors():
+            edit = self.session.change_effect(entry, fx_id, to_fx, self._wide(to_fx))
+        return self._chain_result(edit, f"Entry {entry}: {info.name} -> {to_info.name}")
+
     def revert_edit(self) -> dict:
         with _tool_errors():
             slot, edit = self.session.revert()
@@ -517,6 +581,61 @@ class _Server:
                 "summary": f"Saved what the pedal plays as {patch['name']!r} in slot {slot}"
                            f"{note}"}
 
+    def rename_patch(self, slot: int, expect_name: str, name: str | None,
+                     description: str | None) -> dict:
+        if name is None and description is None:
+            raise ToolError("rename_patch needs a new name or description")
+        with _tool_errors():
+            warnings: list[str] = []
+            if name is not None:
+                _check_name(name)
+            if description is not None:
+                _check_description(description, warnings)
+            out = self.session.rename(slot, expect_name, name, description)
+            data = self.session.read_slot(slot)
+            patch = describe(data, self.catalog, slot=slot)
+        what = " and ".join(w for w, v in (("name", name), ("description", description))
+                            if v is not None)
+        return {**out, "warnings": warnings, "patch": patch,
+                "drawing": self._drawing(data, slot),
+                "summary": f"Slot {slot}: {what} changed ({out['old_name']!r} -> "
+                           f"{out['name']!r})"}
+
+    def search_patches(self, query: str, sources: list[str] | None) -> dict:
+        wanted = set(sources or patch_search.SOURCES)
+        unknown = wanted - set(patch_search.SOURCES)
+        if unknown:
+            raise ToolError(f"unknown source(s) {sorted(unknown)}; use "
+                            f"{', '.join(patch_search.SOURCES)}")
+        with _tool_errors():
+            entries = patch_search.collect(self.session.pedal_patches(),
+                                           self.session.backup_root,
+                                           self.session.root / DOWNLOADS, wanted)
+            hits = patch_search.search(entries, query, lambda d: describe(d, self.catalog),
+                                       self.models)
+        q = query.strip()
+        summary = (f"{len(hits)} hit(s) for {q!r}" if hits else f"no patches match {q!r}")
+        return {"query": q, "sources": sorted(wanted), "hits": hits, "summary": summary}
+
+    def _patch_of(self, ref) -> tuple[bytes, int | None]:
+        if isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit()):
+            slot = int(ref)
+            return self.session.read_slot(slot), slot
+        if isinstance(ref, str) and ref.strip().lower() == "current":
+            return self.session.read_edit(), self.session.current_slot()
+        return load_zptc(self._file(str(ref))), None
+
+    def compare_patches(self, a, b) -> dict:
+        with _tool_errors():
+            da, sa = self._patch_of(a)
+            db, sb = self._patch_of(b)
+            pa, pb = describe(da, self.catalog), describe(db, self.catalog)
+            changes = diff_patches(pa, pb)
+        what = f"{len(changes)} difference(s)" if changes else "identical in name, level and chain"
+        return {"a": a, "b": b, "changes": changes, "drawing_a": self._drawing(da, sa),
+                "drawing_b": self._drawing(db, sb),
+                "summary": f"{pa['name'].strip()} vs {pb['name'].strip()}: {what}"}
+
     def backup_pedal(self) -> dict:
         with _tool_errors():
             path = self.session.backup()
@@ -529,7 +648,7 @@ def build_server(session: PedalSession, catalog: dict | None = None,
     catalog, `default_references(session.root)` and the effect models, loaded on first use."""
     impl = _Server(session, catalog, refs, models)
     session.effect_name = impl.effect_name  # effect names in refusals, from the same catalog
-    server = MCPServer(name="b6", instructions=INSTRUCTIONS)
+    server = MCPServer(name="zoom-b6", instructions=INSTRUCTIONS)
 
     @server.tool(annotations=READ_ONLY, structured_output=True, description=(
         "List all 240 patch slots (1-240) with name and description. Answers from the newest "
@@ -607,6 +726,16 @@ def build_server(session: PedalSession, catalog: dict | None = None,
         return impl.pedal_info()
 
     @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Draw a patch as a text pedalboard (boxes per effect, on/off, knobs in display units, "
+        "footswitch marks): give exactly one of slot (read from the pedal), file (.zptc), spec, "
+        "or current=true (what the pedal plays now). Show the text verbatim in a code block."))
+    def draw_patch(slot: Annotated[int | None, Field(description=SLOT_TEXT)] = None,
+                   file: Annotated[str | None, Field(description=".zptc file")] = None,
+                   spec: Annotated[dict[str, Any] | None, Field(description="Patch spec")] = None,
+                   current: bool = False) -> dict[str, Any]:
+        return impl.draw_patch(slot, file, spec, current)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
         "What the pedal plays now: its slot, AUTO SAVE, whether the patch has unsaved changes "
         "(and which, in display units, against the stored slot), and a running audition."))
     def pedal_status() -> dict[str, Any]:
@@ -644,6 +773,46 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                       on: bool) -> dict[str, Any]:
         return impl.set_effect_on(entry, effect, on)
 
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Add an effect to the patch the pedal plays now, at chain entry `entry`; nothing is "
+        "stored. expect_at names the effect now at that entry (the new one goes in front of "
+        "it); leave it out to append at the end. Refused on a full chain or over the DSP "
+        "budget; the pedal sets the new effect's knobs; read back. Refused while AUTO SAVE is "
+        "on."))
+    def add_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                   effect: Annotated[str, Field(description="Effect to add, e.g. Hall")],
+                   expect_at: Annotated[str | None, Field(description="Effect now at entry")]
+                   = None) -> dict[str, Any]:
+        return impl.add_effect(entry, effect, expect_at)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Remove the effect at chain entry `entry` (named, as a guard) from the patch the pedal "
+        "plays now; nothing is stored; read back. Refused while AUTO SAVE is on."))
+    def remove_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                      effect: Annotated[str, Field(description="Effect expected there")]
+                      ) -> dict[str, Any]:
+        return impl.remove_effect(entry, effect)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Move the effect at chain entry `entry` (named, as a guard) to entry `to` (its index "
+        "once taken out of the chain) in the patch the pedal plays now; nothing is stored; "
+        "read back. Refused while AUTO SAVE is on."))
+    def move_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                    effect: Annotated[str, Field(description="Effect expected there")],
+                    to: Annotated[int, Field(description="New chain-entry index")]
+                    ) -> dict[str, Any]:
+        return impl.move_effect(entry, effect, to)
+
+    @server.tool(annotations=LIVE, structured_output=True, description=(
+        "Change the effect at chain entry `entry` (named, as a guard) into another effect type "
+        "in the patch the pedal plays now; the pedal sets the knobs; nothing is stored; read "
+        "back. Refused while AUTO SAVE is on."))
+    def change_effect(entry: Annotated[int, Field(description="Chain-entry index")],
+                      effect: Annotated[str, Field(description="Effect expected there")],
+                      to_effect: Annotated[str, Field(description="New effect type")]
+                      ) -> dict[str, Any]:
+        return impl.change_effect(entry, effect, to_effect)
+
     @server.tool(annotations=AUDITION, structured_output=True, description=(
         "Drop unsaved changes: the pedal plays the stored patch again. After an audition it "
         "returns to the slot selected before and empties the scratch slot."))
@@ -659,6 +828,39 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                   description: Annotated[str | None, Field(description="New description")]
                   = None) -> dict[str, Any]:
         return impl.save_edit(slot, name, description)
+
+    @server.tool(annotations=DESTRUCTIVE, structured_output=True, description=(
+        "Give a patch on the pedal (any non-empty slot 1-240, factory patches included) a new "
+        "name and/or description; nothing else changes (checked byte for byte). expect_name is "
+        "the slot's current name (guards against a wrong slot). Refused while that slot plays "
+        "with unsaved changes. Backed up, logged and read back like install_patch."))
+    def rename_patch(slot: Slot,
+                     expect_name: Annotated[str, Field(description="The slot's current name")],
+                     name: Annotated[str | None, Field(description="New name, 1-10 ASCII")] = None,
+                     description: Annotated[str | None, Field(description="New description")]
+                     = None) -> dict[str, Any]:
+        return impl.rename_patch(slot, expect_name, name, description)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Search patches without touching the pedal: the pedal's slots (newest full backup plus "
+        "this server's writes), older backups and downloads/patches/. Matches slot number or "
+        "label (A-001), name, description, effect name and the real gear an effect models "
+        "(e.g. SVT, MXR). Each hit's ref (slot or file path) works in draw_patch, "
+        "compare_patches and install_patch."))
+    def search_patches(query: Annotated[str, Field(description="Text to look for")],
+                       sources: Annotated[list[str] | None, Field(
+                           description="Any of pedal, backups, downloads (default all)")] = None
+                       ) -> dict[str, Any]:
+        return impl.search_patches(query, sources)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Compare two patches in display units, with both drawings. Each of a and b is a slot "
+        "number (read from the pedal), a .zptc path, or \"current\" (what the pedal plays "
+        "now)."))
+    def compare_patches(a: Annotated[int | str, Field(description="Slot, .zptc path or current")],
+                        b: Annotated[int | str, Field(description="Slot, .zptc path or current")]
+                        ) -> dict[str, Any]:
+        return impl.compare_patches(a, b)
 
     @server.tool(annotations=BACKUP, structured_output=True, description=(
         "Read all 240 slots (1-240) of the pedal into a new full backup folder under backup/ "

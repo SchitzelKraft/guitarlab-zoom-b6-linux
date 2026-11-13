@@ -17,7 +17,8 @@ def display_value(param: ParamInfo, raw: int):
     labels = param.display_labels
     if labels is not None and 0 <= raw < len(labels):
         return labels[raw]
-    if not _has_scale(param):
+    if not _has_scale(param) or (param.display_through is not None
+                                  and raw > param.display_through):
         return {"raw": raw}
     result = Decimal(param.display_min) + Decimal(param.display_step) * raw
     result = round(result, param.display_precision)
@@ -29,6 +30,12 @@ def display_value(param: ParamInfo, raw: int):
 def _valid_description(param: ParamInfo) -> str:
     if param.display_labels is not None:
         return "valid values: " + ", ".join(param.display_labels)
+    if _has_scale(param) and param.display_through is not None:
+        lo = Decimal(param.display_min)
+        hi = lo + Decimal(param.display_step) * param.display_through
+        return (f"valid range: {lo:.{param.display_precision}f} to "
+                f"{hi:.{param.display_precision}f}, or a tempo-synced note value as "
+                f'{{"raw": {param.display_through + 1}..{"" if param.raw_max is None else param.raw_max}}}')
     if _has_scale(param):
         lo = Decimal(param.display_min)
         hi = lo + Decimal(param.display_step) * param.raw_max if param.raw_max is not None else None
@@ -79,7 +86,8 @@ def raw_value(param: ParamInfo, value) -> int:
         raise _fail(param, value)
     lo = Decimal(param.display_min)
     step = Decimal(param.display_step)
-    if number < lo or (param.raw_max is not None and number > lo + step * param.raw_max):
+    top = param.display_through if param.display_through is not None else param.raw_max
+    if number < lo or (top is not None and number > lo + step * top):
         raise _fail(param, value)
     # Exact grid check: any rounding (Inexact) means the value is not on the grid.
     try:

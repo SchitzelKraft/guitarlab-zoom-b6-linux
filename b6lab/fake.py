@@ -36,6 +36,7 @@ class FakeB6:
         # off (byte 12)
         self.global_reply = bytes.fromhex("52 00 6e 64 09 78 00 00 01 05 00 00 00 00 00 00 00")
         self.auto_save = False     # like the pedal's AUTO SAVE: live edits are stored at once
+        self.wide = set()          # fx IDs the fake treats as double width (tests fill it)
 
     def _check_timeout(self):
         if self.timeout_next:
@@ -154,8 +155,20 @@ class FakeB6:
         self._check_timeout()
         self.type_changes.append((position, fx_id))
         p = ptcf.parse(self.edit)
+        has_tail = position + 1 < len(p.effects) and p.effects[position + 1].is_tail
+        if fx_id in self.wide and not has_tail:
+            # the pedal decides: a double-width type needs a second entry (modelled: added
+            # behind it when the chain has room, else nothing changes)
+            if not ptcf.insert_entry(p, position + 1):
+                return
+            ptcf.set_type(p, position + 1, 1)
+        elif fx_id not in self.wide and has_tail:
+            del p.effects[position + 1]
+            del p.effect_ids[position + 1]
+            ptcf._renumber(p)
         ptcf.set_type(p, position, fx_id)
         self.edit = ptcf.encode(p).ljust(SLOT_SIZE, b"\0")
+        self._auto_store()
 
     # effects on the pedal: FLST_SEQ.ZT2 and the module / icon files (b6lab/ffs.py)
     def read_effect_list(self):

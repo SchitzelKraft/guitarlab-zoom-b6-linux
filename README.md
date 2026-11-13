@@ -1,14 +1,17 @@
-# B6 Lab and B6 Remote
+# B6 Lab, B6 Remote and the B6 MCP server
 
-Two free apps for the Zoom B6 bass multi-effects pedal, made because Zoom's own editor
+** Yes, this was vibe coded. It was tested extensively on my Zoom B6. Do whatever you want with it, if you dare. ** 
+
+Three free tools for the Zoom B6 bass multi-effects pedal, made because Zoom's own editor
 (Guitar Lab) does not run on Linux and its phone app (Handy Guitar Lab) is iOS only:
 
 | App | Runs on | What it is for | How to get it |
 |---|---|---|---|
 | **B6 Lab** | Linux desktop | Full editor: all 240 patches, effects, knobs, names, patch search, import/export, backups | Run from this repository (see below) |
 | **B6 Remote** | Android phone | Live editing of the active patch from a phone on a mic stand, for practice and on stage | Download the APK from the [Releases page](https://github.com/SchitzelKraft/zoom-b6-lab/releases) |
+| **B6 MCP server** | Linux, with an AI assistant (Claude Code, Codex or any MCP client) | Ask an assistant to look up, draw, build, audition, tune, rename and search patches, with safety rules built in | Run from this repository (see [B6 MCP server](#b6-mcp-server-ai-assistant-tools)) |
 
-Both talk to the pedal over a USB cable; no Zoom drivers are needed. They share the same
+All three talk to the pedal over a USB cable; no Zoom drivers are needed. They share the same
 pedal protocol work and the same data files (see [Data files](#data-files-not-in-this-repository)).
 
 ## B6 Lab: Linux desktop editor
@@ -131,17 +134,85 @@ does not start properly without them. Without the others, names, icons and pictu
 `--fake` mode also needs a backup set of your patches in `backup/` (PATCH page > Backup All,
 while connected to the pedal).
 
-## MCP server
+## B6 MCP server: AI assistant tools
 
-`b6lab/mcp_server.py` is a local MCP server (stdio) that lets Claude Code, or any MCP client,
-work with the B6 through a small set of tools with the safety rules built in: read patches,
-look up effects and the real gear they are modelled on, build patches from a spec (name,
-description, level and a chain of effects with knobs in display units, as the pedal shows
-them) and install them to Empty slots. Slots are numbered 1-240, as on the pedal. It needs
-the data files of B6 Lab (effect catalog) and, for building patches, a full backup in
-`backup/` (patches there provide the reference entry of each effect).
+`b6lab/mcp_server.py` is a local [MCP](https://modelcontextprotocol.io) server: it gives an AI
+assistant a set of tools for the B6, with the safety rules built into the server itself (they
+hold whatever the assistant or its approval settings do). The assistant can then do things
+like:
 
-Tools:
+- "What is on my pedal? Draw slot 163." (patch list, a text drawing of the effect chain)
+- "Make a patch for the bass sound of *For the Love of Money* and let me hear it."
+  (build from a spec, audition from a spare Empty slot)
+- "Slower phaser, more echo... keep that as slot 165." (live knobs and effects, then save)
+- "Rename slot 15 to GZR Wah and put the song in the description." (name and description only)
+- "Which patches use an Ampeg SVT?" (search the pedal, backups and downloaded patches)
+
+Slots are numbered 1-240, as on the pedal; knob values are in display units, as the pedal
+shows them.
+
+### Set up (once)
+
+1. Install as for B6 Lab (the `mcp` package is in the install line):
+   `python3 -m venv .venv && .venv/bin/pip install PySide6 pytest pytest-qt "mcp>=2.3,<3"`
+2. Put the data files in place (see [Data files](#data-files-not-in-this-repository)); the
+   server needs the effect catalog in `pedal-files/`.
+3. Connect the pedal and close B6 Lab (only one program can use the pedal's MIDI port). The
+   first tool that needs it makes a full backup in `backup/` (about a minute).
+4. For live tuning (audition, knobs, chain edits), switch the pedal's AUTO SAVE off
+   (SYSTEM > AUTO SAVE); the server refuses those tools while it is on.
+
+The server is started by the assistant as `<repository>/.venv/bin/python -m b6lab.mcp_server`
+(stdio). It finds `backup/`, `pedal-files/` and `downloads/` next to its own code, so it works
+from any folder as long as Python can find the `b6lab` package (`PYTHONPATH`, see below).
+
+### Use it with Claude Code
+
+`.mcp.json` in this folder registers the server as `zoom-b6`. Start Claude Code in this folder and
+approve the project server when asked (or run `claude mcp reset-project-choices` and start
+again if you missed the question). The tools then show up as `mcp__zoom-b6__<tool>`. Suggested
+permission rules for `.claude/settings.local.json` are at the end of this section.
+
+### Use it with Codex
+
+Add the server to `~/.codex/config.toml` (replace the path with where you cloned this
+repository):
+
+```toml
+[mcp_servers.zoom-b6]
+command = "/home/you/zoom-b6-lab/.venv/bin/python"
+args = ["-m", "b6lab.mcp_server"]
+env = { PYTHONPATH = "/home/you/zoom-b6-lab" }
+tool_timeout_sec = 180
+```
+
+`tool_timeout_sec` matters: the first tool that needs the pedal makes a full backup, which takes
+about a minute (Codex's default limit is 60 s). Give other clients a similar timeout when they
+have one.
+
+Start Codex; the B6 tools are available in every session. Codex asks for approval according to
+its own settings; the tool descriptions mark which tools write to the pedal.
+
+### Other MCP clients
+
+Any client that starts a stdio server works with the same three values: the command
+`<repository>/.venv/bin/python`, the arguments `-m b6lab.mcp_server`, and the environment
+variable `PYTHONPATH=<repository>`. In the common JSON format (Claude Desktop, Cursor and
+others):
+
+```json
+{
+  "mcpServers": {
+    "zoom-b6": {
+      "command": "/home/you/zoom-b6-lab/.venv/bin/python",
+      "args": ["-m", "b6lab.mcp_server"],
+      "env": {"PYTHONPATH": "/home/you/zoom-b6-lab"}
+    }
+  }
+}
+```
+
+### Tools
 
 | Tool | What it does | Pedal memory |
 |---|---|---|
@@ -158,37 +229,67 @@ Tools:
 | `set_knob`, `set_effect_on` | Change the patch the pedal plays now, read back | none (not stored) |
 | `revert_edit` | Play the stored patch again (ends an audition) | scratch slot |
 | `save_edit` | Store what the pedal plays now to an Empty slot | write |
+| `add_effect`, `remove_effect`, `move_effect`, `change_effect` | Change the chain of the patch the pedal plays now, read back | none (not stored) |
+| `rename_patch` | New name and/or description for any non-empty slot, nothing else | write |
+| `draw_patch` | A patch as a text pedalboard (also in `get_patch` and `pedal_status`) | read |
+| `search_patches` | Find patches on the pedal, in backups and in `downloads/patches/` by name, description, effect or real gear | none |
+| `compare_patches` | Differences between two patches (slot, file or what the pedal plays), with drawings | read |
 
-Safety rules:
+### Safety rules
 
 - Patches are installed to Empty slots only; any other slot is refused. The pedal switches
   to the slot only when asked (`select`).
 - Every write first backs up the slot to `backup/overwritten/`; the first write of each server
   session also makes a full backup of all 240 slots.
+- `rename_patch` is the only tool that writes a slot that is not Empty: it changes the name
+  and description only (checked byte for byte), needs the slot's current name, and is refused
+  while that slot plays with unsaved changes.
 - Every write is logged in `backup/writes.jsonl`.
 - `clear_slot` only undoes the server's own installs, and only while the slot still holds
   exactly what it wrote; your own patches are never touched.
-- `audition_patch`, `set_knob` and `set_effect_on` are refused while the pedal's AUTO SAVE is
+- `audition_patch`, `set_knob`, `set_effect_on` and the chain edits are refused while the pedal's AUTO SAVE is
   on (it would store the changes): switch it off on the pedal (SYSTEM > AUTO SAVE). The server
   never changes this setting.
 - Only one program can hold the pedal's MIDI port: close B6 Lab while the server talks to the
   pedal. The server opens the port per tool call and never takes it from another program.
 
-Enable it: `.mcp.json` in this folder registers the server as `b6`; Claude Code picks it up
-when started here (approve the project server when asked). Suggested permission rules for
-`.claude/settings.local.json` (read, offline and live tools allowed, memory writes asked every
-time):
+### Claude Code permissions
+
+Rules for `.claude/settings.local.json` (read, offline and live tools
+allowed, writes to pedal memory asked every time):
 
 ```json
 {
   "permissions": {
-    "allow": ["mcp__b6__list_patches", "mcp__b6__get_patch", "mcp__b6__current_patch",
-              "mcp__b6__list_effects", "mcp__b6__effect_info", "mcp__b6__validate_patch",
-              "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
-              "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
-              "mcp__b6__revert_edit"],
-    "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
-            "mcp__b6__save_edit"]
+    "allow": [
+      "mcp__zoom-b6__list_patches",
+      "mcp__zoom-b6__get_patch",
+      "mcp__zoom-b6__current_patch",
+      "mcp__zoom-b6__list_effects",
+      "mcp__zoom-b6__effect_info",
+      "mcp__zoom-b6__validate_patch",
+      "mcp__zoom-b6__build_patch",
+      "mcp__zoom-b6__pedal_info",
+      "mcp__zoom-b6__pedal_status",
+      "mcp__zoom-b6__audition_patch",
+      "mcp__zoom-b6__set_knob",
+      "mcp__zoom-b6__set_effect_on",
+      "mcp__zoom-b6__revert_edit",
+      "mcp__zoom-b6__draw_patch",
+      "mcp__zoom-b6__add_effect",
+      "mcp__zoom-b6__remove_effect",
+      "mcp__zoom-b6__move_effect",
+      "mcp__zoom-b6__change_effect",
+      "mcp__zoom-b6__search_patches",
+      "mcp__zoom-b6__compare_patches"
+    ],
+    "ask": [
+      "mcp__zoom-b6__install_patch",
+      "mcp__zoom-b6__clear_slot",
+      "mcp__zoom-b6__backup_pedal",
+      "mcp__zoom-b6__save_edit",
+      "mcp__zoom-b6__rename_patch"
+    ]
   }
 }
 ```

@@ -27,10 +27,20 @@ from b6lab.device import save_slot, used_bytes, validate_patch
 from b6lab.library import backup_all, list_backups
 from b6lab.midi import B6, DeviceBusy, NotConnected
 from b6lab import live
-from b6lab.patchspec import EMPTY_NAME, chain_effect_ids, is_empty_patch
+from b6lab.patchspec import (BUDGET, EMPTY_NAME, chain_effect_ids, dsp_load, is_empty_patch,
+                             only_text_changed)
 from b6lab.pedal_info import auto_save_on
 
 SLOTS = 240
+TAIL = 1  # fx_id of the second half of a double-width effect
+
+
+def _shapes(fx_id: int, wide: bool | None) -> list[list[int]]:
+    """Chain entries an added or changed effect may take: with its tail when double width;
+    either when the width is unknown (None: no stored patch uses the effect)."""
+    if wide is None:
+        return [[fx_id], [fx_id, TAIL]]
+    return [[fx_id, TAIL]] if wide else [[fx_id]]
 LIVE_SETTLE = 0.25  # seconds before reading back a live knob or on/off change
 SELECT_SETTLE = 0.5  # seconds after selecting a slot before reading the edit buffer
 AUTO_SAVE_TEXT = "switch AUTO SAVE off on the pedal (SYSTEM > AUTO SAVE)"
@@ -75,6 +85,14 @@ def _catalog_name(fx_id: int) -> str:
     return info.name if info is not None else f"0x{fx_id:08X}"
 
 
+def _edited(stored: bytes, edit: bytes) -> bool:
+    """Unsaved changes: level, name or any effect's type, on/off or knobs differ (the edit
+    marker byte the pedal leaves after a live change is not one of these, Phase 0)."""
+    a, b = ptcf.parse(stored), ptcf.parse(edit)
+    return ((a.level, a.name, [(e.fx_id, e.on, e.params) for e in a.effects])
+            != (b.level, b.name, [(e.fx_id, e.on, e.params) for e in b.effects]))
+
+
 def _check_slot(slot) -> int:
     if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= SLOTS:
         raise PedalError(f"slot must be a number 1-{SLOTS}, got {slot!r}")
@@ -94,6 +112,7 @@ class PedalSession:
         self.effect_name = effect_name or _catalog_name  # fx_id -> name, for messages
         self._full_backup_done = False
         self._own = {}  # slot (1-240) -> (name, description, empty) written by this session
+        self._own_data = {}  # slot (1-240) -> the bytes this session wrote there
         self.audition_path = self.backup_root / "audition.json"
         self._scratch: Optional[int] = None         # slot (1-240) holding the audition patch
         self._audition_from: Optional[int] = None   # slot selected before the audition
@@ -126,6 +145,7 @@ class PedalSession:
     def _backup(self, dev) -> str:
         bs = backup_all(dev, self.backup_root)
         self._own = {}  # the new backup already holds this session's writes
+        self._own_data = {}
         return str(bs.path)
 
     def _log(self, action, slot, old, new, backup_file, verified, message):
@@ -171,6 +191,7 @@ class PedalSession:
                 raise PedalError(f"slot {slot} changed while {action}ing; nothing written")
             raise PedalError(f"slot {slot}: {res.message}")
         self._own[slot] = (*_describe(data), is_empty_patch(data))
+        self._own_data[slot] = bytes(data)
         return {"backup_file": str(res.backup_file), "message": res.message,
                 "full_backup": full_backup}
 
@@ -207,6 +228,16 @@ class PedalSession:
     def current_slot(self) -> int:
         with self._device() as dev:
             return dev.selected_slot() + 1
+
+    def pedal_patches(self) -> list:
+        """(slot 1-240, bytes) of the newest full backup with this session's writes applied;
+        empty when there is no backup. No pedal access."""
+        sets = list_backups(self.backup_root)
+        if not sets:
+            return []
+        out = {i + 1: bytes(d) for i, d in enumerate(sets[-1].slots[:SLOTS])}
+        out.update(self._own_data)
+        return sorted(out.items())
 
     def info(self) -> dict:
         """Everything the pedal reports about itself, raw; a read that fails is reported as
@@ -277,6 +308,99 @@ class PedalSession:
         if ptcf.parse(edit).effects[entry].on != bool(on):
             raise PedalError(f"the pedal did not switch entry {entry} {'on' if on else 'off'}")
         return edit
+
+    # --- live chain edits (v3): the pedal decides, the read-back reports ------------------
+
+    def _chain(self, data: bytes) -> str:
+        names = [self.effect_name(e.fx_id) if e.fx_id else "(empty)"
+                 for e in ptcf.parse(data).effects if not e.is_tail]
+        return " > ".join(names) or "no effects"
+
+    def _chain_edit(self, entry: int, fx_id: Optional[int], send, check, what: str,
+                    before_check=None) -> bytes:
+        with self._device() as dev:
+            self._require_auto_save_off(dev)
+            edit = bytes(dev.read_edit())
+            if fx_id is not None:
+                self._guard_effect(edit, entry, fx_id)
+            if before_check:
+                before_check(ptcf.parse(edit), edit)
+            send(dev)
+            time.sleep(LIVE_SETTLE)
+            after = bytes(dev.read_edit())
+        if not check(ptcf.parse(edit), ptcf.parse(after)):
+            raise PedalError(f"the pedal did not {what}; it now plays {self._chain(after)} "
+                             "(revert_edit drops it)")
+        return after
+
+    def add_effect(self, entry: int, fx_id: int, expect_at: Optional[int], wide: bool | None,
+                   load: Optional[float]) -> bytes:
+        def before(p, edit):
+            n = len(p.effects)
+            if expect_at is None and entry != n:
+                raise PedalError(f"entry {entry} is not the end of the chain ({n} entries); "
+                                 "name the effect it goes in front of")
+            if expect_at is not None:
+                self._guard_effect(edit, entry, expect_at)
+            if n >= ptcf.MAX_ENTRIES:
+                raise PedalError("the chain already has 6 entries")
+            if wide and n > ptcf.MAX_ENTRIES - 2:
+                raise PedalError(f"{self.effect_name(fx_id)} takes two entries; no room in a "
+                                 f"chain of {n}")
+            if load is not None and dsp_load(edit) + load > BUDGET:
+                raise PedalError(f"{self.effect_name(fx_id)} would take the DSP total over "
+                                 f"100 % ({(dsp_load(edit) + load) / 2.2:.0f} %)")
+
+        def send(dev):
+            dev.insert_effect(entry)
+            dev.change_type(entry, fx_id)
+
+        def check(a, b):
+            # the chain grew by the new effect and everything else is still there, in order
+            got = [e.fx_id for e in b.effects]
+            return any(got == [e.fx_id for e in a.effects[:entry]] + new
+                       + [e.fx_id for e in a.effects[entry:]] for new in _shapes(fx_id, wide))
+
+        return self._chain_edit(entry, None, send, check,
+                                f"add {self.effect_name(fx_id)} at entry {entry} (no room "
+                                "or not accepted)", before)
+
+    def remove_effect(self, entry: int, fx_id: int) -> bytes:
+        def check(a, b):
+            width = 2 if entry + 1 < len(a.effects) and a.effects[entry + 1].is_tail else 1
+            return len(b.effects) == len(a.effects) - width
+        return self._chain_edit(entry, fx_id, lambda dev: dev.delete_effect(entry), check,
+                                f"remove {self.effect_name(fx_id)} at entry {entry}")
+
+    def move_effect(self, entry: int, fx_id: int, to: int) -> bytes:
+        def before(p, _edit):
+            width = 2 if entry + 1 < len(p.effects) and p.effects[entry + 1].is_tail else 1
+            rest = p.effects[:entry] + p.effects[entry + width:]
+            if not 0 <= to <= len(rest) or (to < len(rest) and rest[to].is_tail):
+                raise PedalError(f"position {to} is not a place in the chain for "
+                                 f"{self.effect_name(fx_id)} (0 to {len(rest)}, not inside a "
+                                 "double-width effect)")
+
+        def check(a, b):
+            ptcf.move_entry(a, entry, to)
+            return [e.fx_id for e in a.effects] == [e.fx_id for e in b.effects]
+        return self._chain_edit(entry, fx_id, lambda dev: dev.move_effect(entry, to), check,
+                                f"move {self.effect_name(fx_id)} from entry {entry} to {to}",
+                                before)
+
+    def change_effect(self, entry: int, fx_id: int, to_fx: int,
+                      wide: bool | None = False) -> bytes:
+        def check(a, b):
+            # the effect at `entry` changed type (with its own second half when double width)
+            # and every other effect is still there, in order
+            old_w = 2 if entry + 1 < len(a.effects) and a.effects[entry + 1].is_tail else 1
+            got = [e.fx_id for e in b.effects]
+            return any(got == [e.fx_id for e in a.effects[:entry]] + new
+                       + [e.fx_id for e in a.effects[entry + old_w:]]
+                       for new in _shapes(to_fx, wide))
+        return self._chain_edit(entry, fx_id, lambda dev: dev.change_type(entry, to_fx), check,
+                                f"change {self.effect_name(fx_id)} at entry {entry} into "
+                                f"{self.effect_name(to_fx)}")
 
     def _select(self, slot: int) -> bytes:
         with self._device() as dev:
@@ -421,6 +545,41 @@ class PedalSession:
             out = self._write(dev, "install", slot, data, live, select)
         return {"slot": slot, "name": name, "backup_file": out["backup_file"],
                 "full_backup": out["full_backup"], "message": out["message"]}
+
+    def rename(self, slot: int, expect_name: str, name: Optional[str],
+               description: Optional[str]) -> dict:
+        """New name and/or description for any non-empty slot (v3; the user's own and factory
+        patches included), nothing else: the new bytes must pass `only_text_changed`. Name and
+        description are validated by the caller."""
+        _check_slot(slot)
+        with self._device() as dev:
+            live = bytes(dev.read_slot(slot - 1))
+            old = ptcf.parse(live)
+            if is_empty_patch(live) or old.name.strip() == EMPTY_NAME:
+                raise PedalError(f"slot {slot} is an Empty slot; rename_patch only renames "
+                                 "patches")
+            if old.name.strip() != expect_name.strip():
+                raise PedalError(f"slot {slot} holds {old.name.strip()!r}, not "
+                                 f"{expect_name.strip()!r}; nothing written")
+            selected = dev.selected_slot() + 1 == slot
+            if selected and _edited(live, bytes(dev.read_edit())):
+                raise PedalError(f"slot {slot} is playing with unsaved changes; save them "
+                                 "(save_edit) or drop them (revert_edit) first")
+            p = ptcf.parse(used_bytes(live))
+            if name is not None:
+                ptcf.set_name(p, name)
+            if description is not None:
+                ptcf.set_comment(p, description)
+                if p.comment != description:
+                    raise PedalError("the description does not fit in the patch; nothing written")
+            new = ptcf.encode(p)
+            if not only_text_changed(live, new):
+                raise PedalError(f"slot {slot}: the renamed patch would differ in more than "
+                                 "name and description; nothing written")
+            out = self._write(dev, "rename", slot, new, live, selected)
+        return {"slot": slot, "old_name": old.name.strip(), "name": p.name.strip(),
+                "backup_file": out["backup_file"], "full_backup": out["full_backup"],
+                "message": out["message"]}
 
     def clear(self, slot: int) -> dict:
         _check_slot(slot)
