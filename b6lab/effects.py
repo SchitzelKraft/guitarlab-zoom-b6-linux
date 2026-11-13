@@ -39,11 +39,14 @@ class ParamInfo:
     display_step: str | None = None
     display_precision: int = 0
     display_labels: list[str] | None = None
+    # Tempo-synced knobs (Rate, Time): numbers only up to this raw value, then note values
+    display_through: int | None = None
 
     def format_value(self, value, raw=False):
         if not raw and self.display_labels is not None and 0 <= value < len(self.display_labels):
             return self.display_labels[value]
-        if raw or self.display_min is None or self.display_step is None:
+        if raw or self.display_min is None or self.display_step is None or (
+                self.display_through is not None and value > self.display_through):
             return f"raw {value}"
         result = Decimal(self.display_min) + Decimal(self.display_step) * value
         return f"{result:.{self.display_precision}f}"
@@ -217,6 +220,8 @@ def _load_parameter_ranges(cat, path):
                     param.display_min = display['minimum']
                     param.display_step = display['step']
                     param.display_precision = display['precision']
+                    if display.get('through') is not None:
+                        param.display_through = int(display['through'])
                 if limit.get('labels'):
                     param.display_labels = list(limit['labels'])
         except (KeyError, OSError, TypeError, ValueError):
