@@ -19,7 +19,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
-from b6lab import draw, effects, ptcf
+from b6lab import draw, effects, patch_search, ptcf
 from b6lab.effect_models import load_models
 from b6lab.knobs import KnobError, display_value, raw_value
 from b6lab.library import list_backups, load_zptc
@@ -597,6 +597,41 @@ class _Server:
                 "summary": f"Slot {slot}: {what} changed ({out['old_name']!r} -> "
                            f"{out['name']!r})"}
 
+    def search_patches(self, query: str, sources: list[str] | None) -> dict:
+        wanted = set(sources or patch_search.SOURCES)
+        unknown = wanted - set(patch_search.SOURCES)
+        if unknown:
+            raise ToolError(f"unknown source(s) {sorted(unknown)}; use "
+                            f"{', '.join(patch_search.SOURCES)}")
+        with _tool_errors():
+            entries = patch_search.collect(self.session.pedal_patches(),
+                                           self.session.backup_root,
+                                           self.session.root / DOWNLOADS, wanted)
+            hits = patch_search.search(entries, query, lambda d: describe(d, self.catalog),
+                                       self.models)
+        q = query.strip()
+        summary = (f"{len(hits)} hit(s) for {q!r}" if hits else f"no patches match {q!r}")
+        return {"query": q, "sources": sorted(wanted), "hits": hits, "summary": summary}
+
+    def _patch_of(self, ref) -> tuple[bytes, int | None]:
+        if isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit()):
+            slot = int(ref)
+            return self.session.read_slot(slot), slot
+        if isinstance(ref, str) and ref.strip().lower() == "current":
+            return self.session.read_edit(), self.session.current_slot()
+        return load_zptc(self._file(str(ref))), None
+
+    def compare_patches(self, a, b) -> dict:
+        with _tool_errors():
+            da, sa = self._patch_of(a)
+            db, sb = self._patch_of(b)
+            pa, pb = describe(da, self.catalog), describe(db, self.catalog)
+            changes = diff_patches(pa, pb)
+        what = f"{len(changes)} difference(s)" if changes else "identical in name, level and chain"
+        return {"a": a, "b": b, "changes": changes, "drawing_a": self._drawing(da, sa),
+                "drawing_b": self._drawing(db, sb),
+                "summary": f"{pa['name'].strip()} vs {pb['name'].strip()}: {what}"}
+
     def backup_pedal(self) -> dict:
         with _tool_errors():
             path = self.session.backup()
@@ -801,6 +836,27 @@ def build_server(session: PedalSession, catalog: dict | None = None,
                      description: Annotated[str | None, Field(description="New description")]
                      = None) -> dict[str, Any]:
         return impl.rename_patch(slot, expect_name, name, description)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Search patches without touching the pedal: the pedal's slots (newest full backup plus "
+        "this server's writes), older backups and downloads/patches/. Matches slot number or "
+        "label (A-001), name, description, effect name and the real gear an effect models "
+        "(e.g. SVT, MXR). Each hit's ref (slot or file path) works in draw_patch, "
+        "compare_patches and install_patch."))
+    def search_patches(query: Annotated[str, Field(description="Text to look for")],
+                       sources: Annotated[list[str] | None, Field(
+                           description="Any of pedal, backups, downloads (default all)")] = None
+                       ) -> dict[str, Any]:
+        return impl.search_patches(query, sources)
+
+    @server.tool(annotations=READ_ONLY, structured_output=True, description=(
+        "Compare two patches in display units, with both drawings. Each of a and b is a slot "
+        "number (read from the pedal), a .zptc path, or \"current\" (what the pedal plays "
+        "now)."))
+    def compare_patches(a: Annotated[int | str, Field(description="Slot, .zptc path or current")],
+                        b: Annotated[int | str, Field(description="Slot, .zptc path or current")]
+                        ) -> dict[str, Any]:
+        return impl.compare_patches(a, b)
 
     @server.tool(annotations=BACKUP, structured_output=True, description=(
         "Read all 240 slots (1-240) of the pedal into a new full backup folder under backup/ "

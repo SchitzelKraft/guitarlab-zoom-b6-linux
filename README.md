@@ -1,5 +1,7 @@
 # B6 Lab, B6 Remote and the B6 MCP server
 
+** Yes, this was vibe coded. It was tested extensively on my Zoom B6. Do whatever you want with it, if you dare. ** 
+
 Three free tools for the Zoom B6 bass multi-effects pedal, made because Zoom's own editor
 (Guitar Lab) does not run on Linux and its phone app (Handy Guitar Lab) is iOS only:
 
@@ -225,6 +227,8 @@ others):
 | `add_effect`, `remove_effect`, `move_effect`, `change_effect` | Change the chain of the patch the pedal plays now, read back | none (not stored) |
 | `rename_patch` | New name and/or description for any non-empty slot, nothing else | write |
 | `draw_patch` | A patch as a text pedalboard (also in `get_patch` and `pedal_status`) | read |
+| `search_patches` | Find patches on the pedal, in backups and in `downloads/patches/` by name, description, effect or real gear | none |
+| `compare_patches` | Differences between two patches (slot, file or what the pedal plays), with drawings | read |
 
 ### Safety rules
 
@@ -257,7 +261,8 @@ allowed, writes to pedal memory asked every time):
               "mcp__b6__build_patch", "mcp__b6__pedal_info", "mcp__b6__pedal_status",
               "mcp__b6__audition_patch", "mcp__b6__set_knob", "mcp__b6__set_effect_on",
               "mcp__b6__revert_edit", "mcp__b6__draw_patch", "mcp__b6__add_effect",
-              "mcp__b6__remove_effect", "mcp__b6__move_effect", "mcp__b6__change_effect"],
+              "mcp__b6__remove_effect", "mcp__b6__move_effect", "mcp__b6__change_effect",
+              "mcp__b6__search_patches", "mcp__b6__compare_patches"],
     "ask": ["mcp__b6__install_patch", "mcp__b6__clear_slot", "mcp__b6__backup_pedal",
             "mcp__b6__save_edit", "mcp__b6__rename_patch"]
   }

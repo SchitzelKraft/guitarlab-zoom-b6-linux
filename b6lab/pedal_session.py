@@ -103,6 +103,7 @@ class PedalSession:
         self.effect_name = effect_name or _catalog_name  # fx_id -> name, for messages
         self._full_backup_done = False
         self._own = {}  # slot (1-240) -> (name, description, empty) written by this session
+        self._own_data = {}  # slot (1-240) -> the bytes this session wrote there
         self.audition_path = self.backup_root / "audition.json"
         self._scratch: Optional[int] = None         # slot (1-240) holding the audition patch
         self._audition_from: Optional[int] = None   # slot selected before the audition
@@ -135,6 +136,7 @@ class PedalSession:
     def _backup(self, dev) -> str:
         bs = backup_all(dev, self.backup_root)
         self._own = {}  # the new backup already holds this session's writes
+        self._own_data = {}
         return str(bs.path)
 
     def _log(self, action, slot, old, new, backup_file, verified, message):
@@ -180,6 +182,7 @@ class PedalSession:
                 raise PedalError(f"slot {slot} changed while {action}ing; nothing written")
             raise PedalError(f"slot {slot}: {res.message}")
         self._own[slot] = (*_describe(data), is_empty_patch(data))
+        self._own_data[slot] = bytes(data)
         return {"backup_file": str(res.backup_file), "message": res.message,
                 "full_backup": full_backup}
 
@@ -216,6 +219,16 @@ class PedalSession:
     def current_slot(self) -> int:
         with self._device() as dev:
             return dev.selected_slot() + 1
+
+    def pedal_patches(self) -> list:
+        """(slot 1-240, bytes) of the newest full backup with this session's writes applied;
+        empty when there is no backup. No pedal access."""
+        sets = list_backups(self.backup_root)
+        if not sets:
+            return []
+        out = {i + 1: bytes(d) for i, d in enumerate(sets[-1].slots[:SLOTS])}
+        out.update(self._own_data)
+        return sorted(out.items())
 
     def info(self) -> dict:
         """Everything the pedal reports about itself, raw; a read that fails is reported as
