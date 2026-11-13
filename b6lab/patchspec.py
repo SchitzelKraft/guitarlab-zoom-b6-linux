@@ -327,8 +327,10 @@ def diff_patches(stored: dict, edit: dict) -> list[str]:
     for entry in sorted(set(a) | set(b)):
         x, y = a.get(entry), b.get(entry)
         if x is None or y is None or x["effect"] != y["effect"]:
-            out.append(f"entry {entry}: {x['effect'] if x else '(none)'} -> "
-                       f"{y['effect'] if y else '(none)'}")
+            out.append(f"entry {entry}: {(x or {}).get('effect') or '(none)'} -> "
+                       f"{(y or {}).get('effect') or '(none)'}")
+            continue
+        if x["effect"] is None:  # an empty entry on both sides
             continue
         where = f"{x['effect']} (entry {entry})"
         if x["on"] != y["on"]:
